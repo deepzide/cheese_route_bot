@@ -29,7 +29,7 @@ ERP_TIMEOUT_SECONDS = 15.0
 
 
 # ------------------------------------------------------------------
-# Experiences (4. Catalog - Experiences)
+# Experiences
 # ------------------------------------------------------------------
 
 
@@ -112,22 +112,34 @@ async def get_experience_detail(
 
 
 # ------------------------------------------------------------------
-# Routes (5. Catalog - Routes)
+# Routes
 # ------------------------------------------------------------------
 
 
 async def list_routes(
     ctx: RunContext[AgentDeps],
-    filters: dict[str, Any] | None = None,
+    page: int = 1,
+    page_size: int = 20,
+    search: str | None = None,
 ) -> list[Route]:
     """List available themed routes with their composition.
 
     Args:
         ctx: Agent run context with dependencies.
-        filters: Optional filter criteria.
+        page: Page number for pagination.
+        page_size: Maximum routes to fetch (default 20).
+        search: Keyword for searching in route names and descriptions.
     """
-    logger.debug("[list_routes] filters=%s", filters)
-    payload: dict[str, Any] = filters or {}
+    logger.debug(
+        "[list_routes] page=%s page_size=%s search=%s", page, page_size, search
+    )
+    payload: dict[str, Any] = {
+        "page": page,
+        "page_size": page_size,
+        "status": "ONLINE",
+    }
+    if search:
+        payload["search"] = search
 
     response = await ctx.deps.erp_client.post(
         f"{ERP_BASE_PATH}.route_controller.list_routes",
@@ -200,7 +212,7 @@ async def get_establishment_details(
     logger.debug("[get_establishment_details] establishment_id=%s", establishment_id)
     response = await ctx.deps.erp_client.post(
         f"{ERP_BASE_PATH}.establishment_controller.get_establishment_details",
-        json={"establishment_id": establishment_id},
+        json={"company_id": establishment_id},
         timeout=ERP_TIMEOUT_SECONDS,
     )
     response.raise_for_status()
@@ -208,7 +220,7 @@ async def get_establishment_details(
 
 
 # ------------------------------------------------------------------
-# Availability (6. Availability)
+# Availability
 # ------------------------------------------------------------------
 
 
@@ -216,7 +228,6 @@ async def get_availability(
     ctx: RunContext[AgentDeps],
     experience_id: str,
     date: str,
-    party_size: int | None = None,
 ) -> AvailabilityResponse:
     """Check real-time availability for an experience on a given date.
 
@@ -224,20 +235,16 @@ async def get_availability(
         ctx: Agent run context with dependencies.
         experience_id: ERP id of the experience.
         date: ISO-format date string (YYYY-MM-DD).
-        party_size: Optional number of people.
     """
     logger.debug(
-        "[get_availability] experience_id=%s date=%s party_size=%s",
+        "[get_availability] experience_id=%s date=%s",
         experience_id,
         date,
-        party_size,
     )
     payload: dict[str, Any] = {
         "experience_id": experience_id,
         "date": date,
     }
-    if party_size is not None:
-        payload["party_size"] = party_size
 
     response = await ctx.deps.erp_client.post(
         f"{ERP_BASE_PATH}.availability_controller.get_availability",

@@ -85,6 +85,10 @@ class ConversationInfo(BaseModel):
     """Persistent conversation returned by the ERP."""
 
     conversation_id: str
+    contact_id: str | None = None
+    channel: str | None = None
+    status: str | None = None
+    is_new: bool | None = None
 
 
 class ConversationEvent(BaseModel):
@@ -107,7 +111,7 @@ class LeadInfo(BaseModel):
     lead_id: str | None = None
     contact_id: str | None = None
     status: LeadStatus = LeadStatus.NOT_CONVERTED
-    interest: str | None = None
+    interest_type: str | None = None
 
 
 # ---------------------------------------------------------------------------

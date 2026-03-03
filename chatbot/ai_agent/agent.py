@@ -6,7 +6,6 @@ from pydantic_ai import Agent
 
 from chatbot.ai_agent.dependencies import AgentDeps
 from chatbot.ai_agent.prompts import SYSTEM_PROMPT
-
 from chatbot.ai_agent.tools.catalog import (
     get_availability,
     get_establishment_details,
@@ -18,11 +17,11 @@ from chatbot.ai_agent.tools.catalog import (
     list_routes,
 )
 from chatbot.ai_agent.tools.customer import (
+    open_or_resume_conversation,
     resolve_or_create_contact,
     update_contact,
     upsert_lead,
 )
-
 
 logger = logging.getLogger(__name__)
 
@@ -44,6 +43,7 @@ AGENT_TOOLS = [
     # Customer / CRM
     resolve_or_create_contact,
     update_contact,
+    open_or_resume_conversation,
     upsert_lead,
 ]
 

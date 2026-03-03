@@ -1,0 +1,138 @@
+"""Shared fixtures for ai_agent functional tests against the real ERP API.
+
+These tests hit the real ERP at https://erp-cheese.deepzide.com using the
+credentials from .env.  They validate that the bot's tool functions correctly
+consume and parse the API responses.
+
+Run the full suite:
+    uv run pytest -s chatbot/ai_agent/tests/ -v
+"""
+
+from __future__ import annotations
+
+from collections.abc import AsyncGenerator, Callable
+from typing import Any
+
+import httpx
+import pytest
+from pydantic_ai import RunContext
+
+from chatbot.ai_agent.context import WebhookContextManager
+from chatbot.ai_agent.dependencies import AgentDeps
+from chatbot.ai_agent.models import ERP_BASE_PATH
+from chatbot.core.config import config
+
+# ---------------------------------------------------------------------------
+# Stub collaborators (not needed for ERP tests)
+# ---------------------------------------------------------------------------
+
+
+class FakeWhatsAppClient:
+    """Stub — we don't send real WhatsApp messages in tests."""
+
+    async def send_text(self, to: str, text: str) -> bool:
+        return True
+
+
+# ---------------------------------------------------------------------------
+# RunContext builder (same lightweight stand-in used by tool functions)
+# ---------------------------------------------------------------------------
+
+
+def build_run_context(deps: AgentDeps) -> RunContext[AgentDeps]:
+    """Create a minimal RunContext for calling tool functions outside the agent loop."""
+    ctx: RunContext[AgentDeps] = RunContext[AgentDeps].__new__(RunContext)  # type: ignore
+    object.__setattr__(ctx, "deps", deps)
+    object.__setattr__(ctx, "retry", 0)
+    object.__setattr__(ctx, "tool_name", "test")
+    object.__setattr__(ctx, "messages", [])
+    return ctx
+
+
+# ---------------------------------------------------------------------------
+# Fixtures
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture(scope="session")
+def erp_headers() -> dict[str, str]:
+    """Authorization headers for the ERP API."""
+    return {
+        "Authorization": f"token {config.ERP_API_TOKEN}",
+        "Content-Type": "application/json",
+    }
+
+
+@pytest.fixture()
+async def erp_client(erp_headers: dict[str, str]) -> AsyncGenerator[httpx.AsyncClient]:
+    """Real httpx.AsyncClient pointing at the ERP."""
+    async with httpx.AsyncClient(
+        headers=erp_headers,
+        timeout=15.0,
+    ) as client:
+        yield client
+
+
+@pytest.fixture()
+def deps(erp_client: httpx.AsyncClient) -> AgentDeps:
+    """AgentDeps wired to the real ERP, with stubs for WhatsApp/DB."""
+    return AgentDeps(
+        erp_client=erp_client,
+        db_services=None,  # type: ignore[arg-type]
+        whatsapp_client=FakeWhatsAppClient(),  # type: ignore[arg-type]
+        webhook_context=WebhookContextManager(),
+        user_phone="+598 99 000 000",
+        user_name="Test Bot",
+        contact_id="CONT-TEST-001",
+        conversation_id="CONV-TEST-001",
+        conversation_language="es",
+    )
+
+
+@pytest.fixture()
+def ctx(deps: AgentDeps) -> RunContext[AgentDeps]:
+    """Ready-to-use RunContext for tool function calls."""
+    return build_run_context(deps)
+
+
+@pytest.fixture()
+def ctx_factory(erp_client: httpx.AsyncClient) -> Callable[..., RunContext[AgentDeps]]:
+    """Factory to create RunContext with custom deps overrides."""
+
+    def _factory(**overrides: Any) -> RunContext[AgentDeps]:
+        base: dict[str, Any] = {
+            "erp_client": erp_client,
+            "db_services": None,
+            "whatsapp_client": FakeWhatsAppClient(),
+            "webhook_context": WebhookContextManager(),
+            "user_phone": "+598 99 000 000",
+            "user_name": "Test Bot",
+            "contact_id": "CONT-TEST-001",
+            "conversation_id": "CONV-TEST-001",
+            "conversation_language": "es",
+        }
+        base.update(overrides)
+        deps = AgentDeps(**base)  # type: ignore[arg-type]
+        return build_run_context(deps)
+
+    return _factory
+
+
+# ---------------------------------------------------------------------------
+# Helper – quick raw POST for setup / teardown
+# ---------------------------------------------------------------------------
+
+
+async def raw_erp_post(
+    client: httpx.AsyncClient,
+    controller_method: str,
+    payload: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Shortcut to call an ERP endpoint and return the 'message' payload."""
+    response = await client.post(
+        f"{ERP_BASE_PATH}.{controller_method}",
+        json=payload or {},
+        timeout=15.0,
+    )
+    response.raise_for_status()
+    return response.json().get("message", response.json())

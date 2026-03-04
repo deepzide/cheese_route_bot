@@ -7,6 +7,7 @@ from pydantic_ai import Agent, RunContext
 
 from chatbot.ai_agent.dependencies import AgentDeps
 from chatbot.ai_agent.instructions import resolve_or_create_contact
+from chatbot.ai_agent.models import GoogleModel
 from chatbot.ai_agent.prompts import SYSTEM_PROMPT
 from chatbot.ai_agent.tools.catalog import (
     get_availability,
@@ -60,13 +61,13 @@ def get_cheese_agent() -> Agent[AgentDeps, str]:
     global _cheese_agent  # noqa: PLW0603
     if _cheese_agent is None:
         _cheese_agent = Agent(
-            model="openai:gpt-5",
+            model=GoogleModel.Gemini_3_Flash_Preview,
             system_prompt=SYSTEM_PROMPT,
             deps_type=AgentDeps,
             tools=AGENT_TOOLS,
         )
 
-        @_cheese_agent.instructions
+        """ @_cheese_agent.instructions
         async def resolve_or_create_contact_instruction(
             ctx: RunContext[AgentDeps],
         ) -> str:
@@ -99,7 +100,7 @@ def get_cheese_agent() -> Agent[AgentDeps, str]:
                     establishment.model_dump_json()
                     for establishment in establishment_list
                 ]
-            )
+            ) """
 
         logger.info("Cheese agent initialized with %d tools", len(AGENT_TOOLS))
     return _cheese_agent

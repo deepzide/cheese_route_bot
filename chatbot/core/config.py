@@ -11,8 +11,9 @@ class MyConfig(BaseSettings):  # type: ignore
     ERP_PASSWORD: str
     ERP_API_TOKEN: str
 
-    # OpenAI
+    # AI
     OPENAI_API_KEY: str
+    GOOGLE_API_KEY: str
 
     # Meta WhatsApp Business API
     WHATSAPP_ACCESS_TOKEN: str
@@ -49,4 +50,4 @@ else:
 
 
 if __name__ == "__main__":
-    print(config.ERP_HOST)
+    print(config.GOOGLE_API_KEY)

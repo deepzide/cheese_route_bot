@@ -17,11 +17,10 @@ from dotenv import load_dotenv
 from pydantic_ai.messages import ModelMessage
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-
-
 from chatbot.ai_agent.agent import get_cheese_agent
 from chatbot.ai_agent.context import WebhookContextManager
 from chatbot.ai_agent.dependencies import AgentDeps
+from chatbot.ai_agent.models import GoogleModel
 from chatbot.core.config import config
 
 load_dotenv()
@@ -84,7 +83,7 @@ async def repl() -> None:
 
         print(SEPARATOR)
         print("  Ruta del Queso — Agent REPL")
-        print("  Modelo: openai:gpt-5")
+        print(f"  Modelo: {GoogleModel.Gemini_3_Flash_Preview}")
         print(f"  ERP:    {config.ERP_HOST}")
         print("  Escribe /exit para salir, /clear para reiniciar historial")
         print(SEPARATOR)

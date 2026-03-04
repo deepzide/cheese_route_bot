@@ -29,7 +29,6 @@ async def update_contact(
     name: str | None = None,
     email: str | None = None,
     phone: str | None = None,
-    idempotency_key: str = "optional-key-123",
 ) -> UpdateContactResult | str:
     """Update/Insert one or more fields of the current contact
 
@@ -41,10 +40,8 @@ async def update_contact(
         name: New display name (only if it differs from the current one).
         email: New email address (only if it differs from the current one).
         phone: New phone number (use with caution – changes the dedup key).
-        idempotency_key: Optional client-generated key to prevent duplicate
-            updates on retries.
     """
-    logger.debug(
+    logger.info(
         "[update_contact] contact_id=%s name=%s email=%s phone=%s",
         ctx.deps.contact_id,
         name,
@@ -57,10 +54,7 @@ async def update_contact(
     if not any([name, email, phone]):
         return "No fields to update. Provide at least one of name, email, or phone."
 
-    payload: dict[str, Any] = {
-        "contact_id": ctx.deps.contact_id,
-        "idempotency_key": idempotency_key,
-    }
+    payload: dict[str, Any] = {"contact_id": ctx.deps.contact_id}
     if name is not None:
         payload["name"] = name
     if email is not None:
@@ -91,7 +85,7 @@ async def update_contact(
     if updated_contact.phone and ctx.deps.user_phone is None:  # Telegram
         ctx.deps.user_phone = updated_contact.phone
 
-    logger.debug(
+    logger.info(
         "Contact updated: %s – changed fields: %s",
         ctx.deps.contact_id,
         result.changed_fields,
@@ -122,7 +116,7 @@ async def upsert_lead(
         ctx: Agent run context with dependencies.
         interest_type: Category of interest (e.g. "Experience", "Route").
     """
-    logger.debug(
+    logger.info(
         "[upsert_lead] contact_id=%s conversation_id=%s interest_type=%s",
         ctx.deps.contact_id,
         conversation_id,
@@ -148,5 +142,5 @@ async def upsert_lead(
     data: dict[str, Any] = extract_erp_data(response.json())
 
     lead = LeadInfo.model_validate(data)
-    logger.debug("Lead upserted: %s – status=%s", lead.lead_id, lead.status)
+    logger.info("Lead upserted: %s – status=%s", lead.lead_id, lead.status)
     return lead

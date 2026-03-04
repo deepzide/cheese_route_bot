@@ -1,6 +1,7 @@
 import logging
 
 import httpx
+from dotenv import load_dotenv
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Request
 from fastapi.responses import PlainTextResponse
 from pydantic_ai import AgentRunResult
@@ -18,6 +19,7 @@ from chatbot.messaging.telegram_notifier import notify_error
 from chatbot.messaging.whatsapp import whatsapp_manager
 
 logger = logging.getLogger(__name__)
+load_dotenv()
 router = APIRouter()
 ERROR_STATUS = {"status": "error"}
 OK_STATUS = {"status": "ok"}
@@ -108,8 +110,8 @@ async def _process_message(message: Message) -> None:
         ai_response: str = result.output
         tools_used = _extract_tools_used(result)
 
-        logger.info("Agent response for %s: %s", user_number, ai_response[:120])
-        logger.debug("Tools used: %s", tools_used)
+        logger.info("🤖 Agent response for %s: %s", user_number, ai_response[:120])
+        logger.debug("🔧 Tools used: %s", tools_used)
 
         await message_handler.save_assistant_msg(user_number, ai_response, tools_used)
         await whatsapp_manager.send_text(

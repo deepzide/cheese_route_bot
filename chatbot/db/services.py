@@ -1,7 +1,7 @@
 import json
 import logging
 import sys
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import asyncpg
@@ -139,7 +139,7 @@ class Services:
 
     async def get_recent_messages(self, phone: str, hours: int = 24) -> list:
         """Return all messages for *phone* created within the last *hours* hours."""
-        since: datetime = datetime.utcnow() - timedelta(hours=hours)
+        since: datetime = datetime.now(UTC).replace(tzinfo=None) - timedelta(hours=hours)
         query = (
             message_table.select()
             .where(message_table.c.user_phone == phone)

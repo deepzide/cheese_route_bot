@@ -54,7 +54,7 @@ async def list_experiences(
         search: Keyword for searching in title and description.
         date: Availability date (YYYY-MM-DD).
     """
-    logger.debug(
+    logger.info(
         "[list_experiences] page=%s page_size=%s package_mode=%s search=%s date=%s",
         page,
         page_size,
@@ -101,7 +101,7 @@ async def get_experience_detail(
         ctx: Agent run context with dependencies.
         experience_id: ERP id/name of the experience.
     """
-    logger.debug("[get_experience_detail] experience_id=%s", experience_id)
+    logger.info("[get_experience_detail] experience_id=%s", experience_id)
     response = await ctx.deps.erp_client.post(
         f"{ERP_BASE_PATH}.experience_controller.get_experience_detail",
         json={"experience_id": experience_id},
@@ -130,7 +130,7 @@ async def list_routes(
         page_size: Maximum routes to fetch (default 20).
         search: Keyword for searching in route names and descriptions.
     """
-    logger.debug(
+    logger.info(
         "[list_routes] page=%s page_size=%s search=%s", page, page_size, search
     )
     payload: dict[str, Any] = {
@@ -161,7 +161,7 @@ async def get_route_detail(
         ctx: Agent run context with dependencies.
         route_id: ERP id/name of the route.
     """
-    logger.debug("[get_route_detail] route_id=%s", route_id)
+    logger.info("[get_route_detail] route_id=%s", route_id)
     response = await ctx.deps.erp_client.post(
         f"{ERP_BASE_PATH}.route_controller.get_route_detail",
         json={"route_id": route_id},
@@ -188,7 +188,7 @@ async def list_establishments(
         page: Page number (1-based).
         page_size: Items per page.
     """
-    logger.debug("[list_establishments] page=%s page_size=%s", page, page_size)
+    logger.info("[list_establishments] page=%s page_size=%s", page, page_size)
     response = await ctx.deps.erp_client.post(
         f"{ERP_BASE_PATH}.establishment_controller.list_establishments",
         json={"page": page, "page_size": page_size},
@@ -209,7 +209,7 @@ async def get_establishment_details(
         ctx: Agent run context with dependencies.
         establishment_id: ERP id of the establishment.
     """
-    logger.debug("[get_establishment_details] establishment_id=%s", establishment_id)
+    logger.info("[get_establishment_details] establishment_id=%s", establishment_id)
     response = await ctx.deps.erp_client.post(
         f"{ERP_BASE_PATH}.establishment_controller.get_establishment_details",
         json={"company_id": establishment_id},
@@ -236,7 +236,7 @@ async def get_availability(
         experience_id: ERP id of the experience.
         date: ISO-format date string (YYYY-MM-DD).
     """
-    logger.debug(
+    logger.info(
         "[get_availability] experience_id=%s date=%s",
         experience_id,
         date,
@@ -269,7 +269,7 @@ async def get_route_availability(
         date: ISO-format date string (YYYY-MM-DD).
         party_size: Number of people in the group.
     """
-    logger.debug(
+    logger.info(
         "[get_route_availability] route_id=%s date=%s party_size=%s",
         route_id,
         date,

@@ -27,10 +27,6 @@ from chatbot.ai_agent.tools.customer import (
 logger = logging.getLogger(__name__)
 ERP_TIMEOUT_SECONDS = 15.0
 
-# ---------------------------------------------------------------------------
-# Tool registry
-# resolve_or_create_contact is NOT here – it runs as @agent.system_prompt
-# ---------------------------------------------------------------------------
 
 AGENT_TOOLS = [
     # Catalog & discovery

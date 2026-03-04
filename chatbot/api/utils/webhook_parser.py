@@ -100,13 +100,6 @@ async def extract_message_content(webhook_data: dict) -> tuple[str, str, str] | 
         return None
 
 
-def create_or_retrieve_voice_dir() -> Path:
-    repo_root = Path(__file__).resolve().parents[3]
-    voice_dir = repo_root / "static" / "voice"
-    voice_dir.mkdir(parents=True, exist_ok=True)
-    return voice_dir
-
-
 async def _extract_voice_from_message(
     message_id: str,
     media_url: str,
@@ -162,3 +155,10 @@ def _extract_text_from_message(message: dict, user_number: str) -> str:
         logger.warning(f"Unsupported message type: {message_type}")
 
     return ""
+
+
+def create_or_retrieve_voice_dir() -> Path:
+    repo_root = Path(__file__).resolve().parents[3]
+    voice_dir = repo_root / "static" / "voice"
+    voice_dir.mkdir(parents=True, exist_ok=True)
+    return voice_dir

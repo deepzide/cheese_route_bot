@@ -1,10 +1,18 @@
 import json
 import logging
 import sys
+from datetime import datetime, timedelta
 from pathlib import Path
 
 import asyncpg
 import sqlalchemy
+from pydantic_ai.messages import (
+    ModelMessage,
+    ModelRequest,
+    ModelResponse,
+    TextPart,
+    UserPromptPart,
+)
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from chatbot.db.schema import init_db, message_table, users_table
@@ -128,6 +136,46 @@ class Services:
             logger.debug(query)
 
         await self.database.execute(query)
+
+    async def get_recent_messages(self, phone: str, hours: int = 24) -> list:
+        """Return all messages for *phone* created within the last *hours* hours."""
+        since: datetime = datetime.utcnow() - timedelta(hours=hours)
+        query = (
+            message_table.select()
+            .where(message_table.c.user_phone == phone)
+            .where(message_table.c.created_at >= since)
+            .order_by(message_table.c.created_at.asc())
+        )
+        if self.debug:
+            logger.debug(query)
+        return await self.database.fetch_all(query)
+
+    async def get_pydantic_ai_history(
+        self, phone: str, hours: int = 24
+    ) -> list[ModelMessage]:
+        """Return the last *hours* hours of conversation as PydanticAI ModelMessage objects.
+
+        Reconstructs ModelRequest/ModelResponse pairs from the stored text rows so
+        the agent can continue the conversation with full context.
+        """
+        rows = await self.get_recent_messages(phone, hours=hours)
+        history: list[ModelMessage] = []
+        for row in rows:
+            role: str = row.role  # type: ignore[attr-defined]
+            raw: str = row.message  # type: ignore[attr-defined]
+            content = raw.removeprefix("Usuario - ").removeprefix("Bot - ")
+            if role == "user":
+                history.append(ModelRequest(parts=[UserPromptPart(content=content)]))
+            elif role == "assistant":
+                history.append(
+                    ModelResponse(
+                        parts=[TextPart(content=content)], model_name="restored"
+                    )
+                )
+        logger.debug(
+            "Loaded %d history messages for %s (last %dh)", len(history), phone, hours
+        )
+        return history
 
     async def get_messages(self, phone: str):
         query = (

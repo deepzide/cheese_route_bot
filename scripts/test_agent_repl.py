@@ -31,12 +31,14 @@ logging.basicConfig(
     format="%(asctime)s | %(levelname)-7s | %(name)s | %(message)s",
     datefmt="%H:%M:%S",
 )
-logger = logging.getLogger("test_agent_repl")
+logger = logging.getLogger("chatbot.agent_repl")
 
 # Silence noisy loggers
 logging.getLogger("httpx").setLevel(logging.WARNING)
 logging.getLogger("httpcore").setLevel(logging.WARNING)
 logging.getLogger("openai").setLevel(logging.WARNING)
+# Show DEBUG messages from the chatbot package
+logging.getLogger("chatbot").setLevel(logging.DEBUG)
 
 SEPARATOR = "-" * 60
 TEST_PHONE = "+598 99 000 000"
@@ -66,7 +68,6 @@ def _build_deps(erp_client: httpx.AsyncClient) -> AgentDeps:
         webhook_context=WebhookContextManager(),
         user_phone=TEST_PHONE,
         user_name="Test User",
-        conversation_language="es",
     )
 
 

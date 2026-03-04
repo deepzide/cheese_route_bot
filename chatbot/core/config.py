@@ -31,6 +31,10 @@ class MyConfig(BaseSettings):  # type: ignore
     # Auth
     ADMIN_API_KEY: str
 
+    # Telegram developer notifications
+    TELEGRAM_BOT_TOKEN: str
+    TELEGRAM_DEV_CHAT_ID: str
+
     # Server
     SERVER_HOST: str
 

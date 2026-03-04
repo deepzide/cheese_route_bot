@@ -1,10 +1,13 @@
 """Pydantic models for agent I/O and ERP API data structures.
 
 All models that represent data coming from the ERP use Pydantic (external data).
-Internal-only structures use dataclass (see dependencies.py, context.py).
+Internal-only structures use dataclass (see dependencies.py).
 
 ERP base: https://erp-cheese.deepzide.com
 All endpoints are POST under /api/method/cheese.api.v1.<controller>.<method>
+
+Models are derived from real Postman request/response examples located in
+context/erp_in_out_examples/.
 """
 
 from __future__ import annotations
@@ -48,13 +51,18 @@ class LeadStatus(StrEnum):
 
 
 class ContactInfo(BaseModel):
-    """CRM contact resolved or created by the ERP."""
+    """CRM contact resolved or created by the ERP.
+
+    ERP response fields: contact_id, full_name, phone, email, is_new.
+    """
 
     contact_id: str
     phone: str | None = None
     name: str | None = None
     email: str | None = None
     is_new: bool | None = None
+    preferred_language: str | None = None
+    preferred_channel: str | None = None
 
     @model_validator(mode="before")
     @classmethod
@@ -64,6 +72,17 @@ class ContactInfo(BaseModel):
             if "full_name" in data and "name" not in data:
                 data["name"] = data["full_name"]
         return data
+
+
+class UpdateContactResult(BaseModel):
+    """Response from contact_controller.update_contact.
+
+    ERP response fields: contact (ContactInfo), changed_fields, audit_event_id.
+    """
+
+    contact: ContactInfo
+    changed_fields: list[str] = Field(default_factory=list)
+    audit_event_id: str | None = None
 
 
 class UpdateContactRequest(BaseModel):
@@ -100,17 +119,34 @@ class ConversationEvent(BaseModel):
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
+class ConversationEventResponse(BaseModel):
+    """Response from conversation_controller.append_conversation_event.
+
+    ERP response fields: event_id, conversation_id, event_type, created_at.
+    """
+
+    event_id: str
+    conversation_id: str
+    event_type: str
+    created_at: str | None = None
+
+
 # ---------------------------------------------------------------------------
 # 3. Leads
 # ---------------------------------------------------------------------------
 
 
 class LeadInfo(BaseModel):
-    """CRM lead record."""
+    """CRM lead record returned by lead_controller.upsert_lead.
+
+    ERP response fields: lead_id, contact_id, status, is_new.
+    Note: interest_type is NOT returned by the ERP response.
+    """
 
     lead_id: str | None = None
     contact_id: str | None = None
     status: LeadStatus = LeadStatus.NOT_CONVERTED
+    is_new: bool | None = None
     interest_type: str | None = None
 
 
@@ -119,46 +155,130 @@ class LeadInfo(BaseModel):
 # ---------------------------------------------------------------------------
 
 
-class Experience(BaseModel):
-    """Bookable experience from the ERP catalog."""
+class ExperienceListItem(BaseModel):
+    """Experience item as returned by experience_controller.list_experiences.
+
+    ERP response fields: name/id/experience_name, company, establishment,
+    description, status, package_mode, individual_price, route_price,
+    deposit_required.
+    """
 
     experience_id: str
     name: str
-    description: str | None = None
+    company: str | None = None
     establishment_id: str | None = None
-    price: float | None = None
-    currency: str = "UYU"
-    duration_minutes: int | None = None
-    requires_deposit: bool = False
-    package_only: bool = False
-    is_online: bool = True
+    description: str | None = None
+    status: str | None = None
+    package_mode: str | None = None
+    individual_price: float | None = None
+    route_price: float | None = None
+    deposit_required: bool = False
 
     @model_validator(mode="before")
     @classmethod
-    def _normalize(cls, data: Any) -> Any:  # noqa: C901
+    def _normalize(cls, data: Any) -> Any:
         if isinstance(data, dict):
-            # ERP sends "id" or "name" as identifier
             if "experience_id" not in data:
                 data["experience_id"] = data.get("id", data.get("name", ""))
-            # ERP sends "experience_name" instead of "name"
             if "experience_name" in data and "name" not in data:
                 data["name"] = data["experience_name"]
-            # ERP sends "status": "ONLINE" instead of "is_online"
-            if "status" in data and "is_online" not in data:
-                data["is_online"] = data["status"] == "ONLINE"
-            # ERP sends "individual_price" and "route_price"
-            if "individual_price" in data and "price" not in data:
-                data["price"] = data["individual_price"]
-            # ERP sends "deposit_required": 1/0
-            if "deposit_required" in data and "requires_deposit" not in data:
-                data["requires_deposit"] = bool(data["deposit_required"])
-            # ERP sends "establishment" instead of "establishment_id"
             if "establishment" in data and "establishment_id" not in data:
-                data["establishment_id"] = data["establishment"]
-            # ERP sends "package_mode": "Both"/"Individual"/"Route"
-            if "package_mode" in data and "package_only" not in data:
-                data["package_only"] = data["package_mode"] == "Route"
+                est = data["establishment"]
+                data["establishment_id"] = (
+                    est if isinstance(est, str) else est.get("id")
+                )
+            if "deposit_required" in data:
+                data["deposit_required"] = bool(data["deposit_required"])
         return data
+
+
+# Keep legacy alias for backwards compatibility with existing tool code
+Experience = ExperienceListItem
+
+
+class EstablishmentRef(BaseModel):
+    """Minimal establishment reference embedded in experience detail."""
+
+    id: str
+    name: str
+
+
+class NextAvailability(BaseModel):
+    """Next available slot embedded in experience detail."""
+
+    slot_id: str
+    date: str | None = None
+    time: str | None = None
+    available_capacity: int | None = None
+
+
+class ExperiencePricing(BaseModel):
+    """Pricing block from experience detail."""
+
+    individual_price: float | None = None
+    route_price: float | None = None
+
+
+class ExperienceDeposit(BaseModel):
+    """Deposit policy block from experience detail."""
+
+    deposit_required: bool = False
+    deposit_type: str | None = None
+    deposit_value: float | None = None
+    deposit_ttl_hours: int | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def _normalize(cls, data: Any) -> Any:
+        if isinstance(data, dict) and "deposit_required" in data:
+            data["deposit_required"] = bool(data["deposit_required"])
+        return data
+
+
+class ExperienceSettings(BaseModel):
+    """Settings block from experience detail."""
+
+    manual_confirmation: bool = False
+
+    @model_validator(mode="before")
+    @classmethod
+    def _normalize(cls, data: Any) -> Any:
+        if isinstance(data, dict) and "manual_confirmation" in data:
+            data["manual_confirmation"] = bool(data["manual_confirmation"])
+        return data
+
+
+class BookingPolicy(BaseModel):
+    """Booking restrictions from experience detail."""
+
+    cancel_until_hours_before: int | None = None
+    modify_until_hours_before: int | None = None
+    min_hours_before_booking: int | None = None
+
+
+class ExperienceDetail(BaseModel):
+    """Full experience detail from experience_controller.get_experience_detail.
+
+    ERP response fields: experience_id, name, event_duration, company,
+    establishment {id, name}, establishment_google_maps_link, description,
+    status, package_mode, next_availability, pricing, deposit, settings,
+    booking_policy.
+    """
+
+    experience_id: str
+    name: str
+    event_duration: str | None = None
+    company: str | None = None
+    establishment: EstablishmentRef | None = None
+    establishment_google_maps_link: str | None = None
+    description: str | None = None
+    status: str | None = None
+    package_mode: str | None = None
+    next_availability: NextAvailability | None = None
+    pricing: ExperiencePricing | None = None
+    deposit: ExperienceDeposit | None = None
+    settings: ExperienceSettings | None = None
+    booking_policy: BookingPolicy | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -166,15 +286,45 @@ class Experience(BaseModel):
 # ---------------------------------------------------------------------------
 
 
+class RouteExperienceRef(BaseModel):
+    """Experience reference embedded in route list item.
+
+    ERP response fields: id, experience, establishment.
+    """
+
+    experience_id: str
+    experience_name: str | None = None
+    establishment: str | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def _normalize(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            if "experience_id" not in data:
+                data["experience_id"] = data.get("id", "")
+            if "experience_name" not in data:
+                data["experience_name"] = data.get(
+                    "experience", data.get("experience_name")
+                )
+        return data
+
+
 class Route(BaseModel):
-    """Pre-assembled themed route."""
+    """Route item as returned by route_controller.list_routes.
+
+    ERP response fields: name/route_id/route_name, description, status,
+    price_mode, price, experiences [{id, experience, establishment}],
+    experiences_count.
+    """
 
     route_id: str
     name: str
     description: str | None = None
-    experiences: list[dict[str, Any]] = Field(default_factory=list)
+    status: str | None = None
+    price_mode: str | None = None
     total_price: float | None = None
-    currency: str = "UYU"
+    experiences: list[RouteExperienceRef] = Field(default_factory=list)
+    experiences_count: int | None = None
 
     @model_validator(mode="before")
     @classmethod
@@ -182,12 +332,58 @@ class Route(BaseModel):
         if isinstance(data, dict):
             if "route_id" not in data:
                 data["route_id"] = data.get("id", data.get("name", ""))
-            # ERP sends "route_name" instead of "name"
             if "route_name" in data and "name" not in data:
                 data["name"] = data["route_name"]
-            # ERP sends "price" instead of "total_price"
             if "price" in data and "total_price" not in data:
                 data["total_price"] = data["price"]
+        return data
+
+
+class RouteExperienceDetail(BaseModel):
+    """Experience embedded in route detail response.
+
+    ERP fields: experience_id, experience_name, description, sequence,
+    status, company.
+    """
+
+    experience_id: str
+    experience_name: str | None = None
+    description: str | None = None
+    sequence: int | None = None
+    status: str | None = None
+    company: str | None = None
+
+
+class RouteDetail(BaseModel):
+    """Full route detail from route_controller.get_route_detail.
+
+    ERP response fields: route_id, name, description, status, price_mode,
+    price, deposit_required, deposit_type, deposit_value, deposit_ttl_hours,
+    experiences [{experience_id, experience_name, description, sequence,
+    status, company}], experiences_count.
+    """
+
+    route_id: str
+    name: str
+    description: str | None = None
+    status: str | None = None
+    price_mode: str | None = None
+    total_price: float | None = None
+    deposit_required: bool = False
+    deposit_type: str | None = None
+    deposit_value: float | None = None
+    deposit_ttl_hours: int | None = None
+    experiences: list[RouteExperienceDetail] = Field(default_factory=list)
+    experiences_count: int | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def _normalize(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            if "price" in data and "total_price" not in data:
+                data["total_price"] = data["price"]
+            if "deposit_required" in data:
+                data["deposit_required"] = bool(data["deposit_required"])
         return data
 
 
@@ -197,21 +393,69 @@ class Route(BaseModel):
 
 
 class TimeSlot(BaseModel):
-    """Available time slot for a given experience/date."""
+    """Available time slot from availability_controller.get_availability.
+
+    ERP response fields: slot_id, date, time, max_capacity,
+    available_capacity, slot_status, is_available.
+    """
 
     slot_id: str
-    start: datetime | None = None
-    end: datetime | None = None
+    date: str | None = None
+    time: str | None = None
+    max_capacity: int | None = None
     available_capacity: int | None = None
+    slot_status: str | None = None
+    is_available: bool = True
 
 
 class AvailabilityResponse(BaseModel):
-    """Result of an availability lookup."""
+    """Result of availability_controller.get_availability.
+
+    ERP response fields: experience_id, experience_name, date, slots,
+    total_slots, available_slots.
+    """
 
     experience_id: str | None = None
-    route_id: str | None = None
+    experience_name: str | None = None
     date: str | None = None
     slots: list[TimeSlot] = Field(default_factory=list)
+    total_slots: int | None = None
+    available_slots: int | None = None
+
+
+class RouteSlot(BaseModel):
+    """Minimal slot embedded in route availability response."""
+
+    slot_id: str
+    time: str | None = None
+    available_capacity: int | None = None
+
+
+class RouteExperienceAvailability(BaseModel):
+    """Availability per experience inside a route availability response."""
+
+    experience_id: str
+    experience_name: str | None = None
+    sequence: int | None = None
+    available: bool = False
+    available_slots: list[RouteSlot] = Field(default_factory=list)
+    available_slots_count: int | None = None
+
+
+class RouteAvailabilityResponse(BaseModel):
+    """Result of availability_controller.get_route_availability.
+
+    ERP response fields: route_id, date, party_size, available,
+    experiences [{experience_id, experience_name, sequence, available,
+    available_slots [{slot_id, time, available_capacity}],
+    available_slots_count}].
+    """
+
+    route_id: str | None = None
+    date: str | None = None
+    party_size: int | None = None
+    available: bool = False
+    experiences: list[RouteExperienceAvailability] = Field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------
@@ -219,13 +463,38 @@ class AvailabilityResponse(BaseModel):
 # ---------------------------------------------------------------------------
 
 
+class PricingBreakdownItem(BaseModel):
+    """Single item in a pricing preview breakdown.
+
+    Supports both experience and route item types.
+    """
+
+    type: str | None = None
+    experience_id: str | None = None
+    experience_name: str | None = None
+    route_id: str | None = None
+    route_name: str | None = None
+    slot_id: str | None = None
+    price_mode: str | None = None
+    unit_price: float | None = None
+    price: float | None = None
+    deposit: float | None = None
+    party_size: int | None = None
+
+
 class PricingPreview(BaseModel):
-    """Pricing breakdown returned before booking."""
+    """Pricing preview from pricing_controller.get_pricing_preview.
+
+    ERP response fields: total_price, total_deposit, final_price,
+    breakdown, party_size, items_count.
+    """
 
     total_price: float | None = None
-    deposit_amount: float | None = None
-    currency: str = "UYU"
-    breakdown: list[dict[str, Any]] = Field(default_factory=list)
+    total_deposit: float | None = None
+    final_price: float | None = None
+    breakdown: list[PricingBreakdownItem] = Field(default_factory=list)
+    party_size: int | None = None
+    items_count: int | None = None
 
 
 class ModificationPolicy(BaseModel):
@@ -247,7 +516,95 @@ class CancellationImpact(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# 8. Individual Reservations
+# 8. Establishments
+# ---------------------------------------------------------------------------
+
+
+class EstablishmentListItem(BaseModel):
+    """Establishment item from establishment_controller.list_establishments.
+
+    ERP response fields: company_id, company_name, status, email, phone,
+    website, description, experiences_count, online_experiences_count.
+    """
+
+    establishment_id: str
+    name: str
+    status: str | None = None
+    email: str | None = None
+    phone: str | None = None
+    website: str | None = None
+    description: str | None = None
+    experiences_count: int | None = None
+    online_experiences_count: int | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def _normalize(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            if "establishment_id" not in data:
+                data["establishment_id"] = data.get(
+                    "company_id", data.get("id", data.get("name", ""))
+                )
+            if "company_name" in data and "name" not in data:
+                data["name"] = data["company_name"]
+        return data
+
+
+# Keep legacy alias for backwards compatibility
+Establishment = EstablishmentListItem
+
+
+class EstablishmentExperience(BaseModel):
+    """Experience embedded in establishment detail response."""
+
+    name: str
+    experience_name: str | None = None
+    description: str | None = None
+    status: str | None = None
+    individual_price: float | None = None
+    route_price: float | None = None
+
+
+class EstablishmentDetail(BaseModel):
+    """Full establishment detail from establishment_controller.get_establishment_details.
+
+    ERP response fields: company_id, company_name, status, email, phone,
+    website, description, address, contacts, experiences,
+    tickets_by_status, logo, documents, photos, links, pdfs.
+    """
+
+    establishment_id: str
+    name: str
+    status: str | None = None
+    email: str | None = None
+    phone: str | None = None
+    website: str | None = None
+    description: str | None = None
+    address: str | None = None
+    contacts: list[Any] = Field(default_factory=list)
+    experiences: list[EstablishmentExperience] = Field(default_factory=list)
+    tickets_by_status: dict[str, int] = Field(default_factory=dict)
+    logo: str | None = None
+    documents: list[Any] = Field(default_factory=list)
+    photos: list[Any] = Field(default_factory=list)
+    links: list[Any] = Field(default_factory=list)
+    pdfs: list[Any] = Field(default_factory=list)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _normalize(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            if "establishment_id" not in data:
+                data["establishment_id"] = data.get(
+                    "company_id", data.get("id", data.get("name", ""))
+                )
+            if "company_name" in data and "name" not in data:
+                data["name"] = data["company_name"]
+        return data
+
+
+# ---------------------------------------------------------------------------
+# 9. Individual Reservations
 # ---------------------------------------------------------------------------
 
 
@@ -280,172 +637,6 @@ class ModificationPreview(BaseModel):
     changes: list[dict[str, Any]] = Field(default_factory=list)
     price_delta: float | None = None
     message: str | None = None
-
-
-# ---------------------------------------------------------------------------
-# 9. Route Reservations
-# ---------------------------------------------------------------------------
-
-
-class RouteBookingResponse(BaseModel):
-    """Route booking (aggregated reservation for a route)."""
-
-    route_booking_id: str
-    route_id: str | None = None
-    status: ReservationStatus = ReservationStatus.PENDING
-    reservations: list[ReservationResponse] = Field(default_factory=list)
-    summary: str | None = None
-
-    @model_validator(mode="before")
-    @classmethod
-    def _normalize(cls, data: Any) -> Any:
-        if isinstance(data, dict):
-            if "route_booking_id" not in data:
-                data["route_booking_id"] = data.get("id", data.get("name", ""))
-        return data
-
-
-# ---------------------------------------------------------------------------
-# 10. Mixed Booking
-# ---------------------------------------------------------------------------
-
-
-class BookingResponse(BaseModel):
-    """Mixed booking aggregator – may contain route + individual reservations."""
-
-    booking_id: str
-    status: ReservationStatus = ReservationStatus.PENDING
-    route_booking: RouteBookingResponse | None = None
-    individual_reservations: list[ReservationResponse] = Field(default_factory=list)
-    total_price: float | None = None
-    currency: str = "UYU"
-
-    @model_validator(mode="before")
-    @classmethod
-    def _normalize(cls, data: Any) -> Any:
-        if isinstance(data, dict):
-            if "booking_id" not in data:
-                data["booking_id"] = data.get("id", data.get("name", ""))
-        return data
-
-
-# ---------------------------------------------------------------------------
-# 11. Payment
-# ---------------------------------------------------------------------------
-
-
-class PaymentInstructions(BaseModel):
-    """Payment link or instructions for a reservation / booking."""
-
-    payment_link: str | None = None
-    instructions: str | None = None
-    deposit_amount: float | None = None
-    currency: str = "UYU"
-
-
-class PaymentStatus(BaseModel):
-    """Consolidated payment status."""
-
-    status: str | None = None
-    amount_paid: float | None = None
-    amount_due: float | None = None
-    currency: str = "UYU"
-
-
-# ---------------------------------------------------------------------------
-# 12. QR and Check-in
-# ---------------------------------------------------------------------------
-
-
-class QRInfo(BaseModel):
-    """QR data for check-in."""
-
-    qr_token: str | None = None
-    qr_url: str | None = None
-    reservation_id: str | None = None
-
-
-class CheckinStatus(BaseModel):
-    """Check-in status for a reservation."""
-
-    reservation_id: str | None = None
-    checked_in: bool = False
-    checked_in_at: datetime | None = None
-
-
-# ---------------------------------------------------------------------------
-# 13. Itinerary
-# ---------------------------------------------------------------------------
-
-
-class ItineraryResponse(BaseModel):
-    """Customer itinerary with all their reservations."""
-
-    contact_id: str
-    items: list[dict[str, Any]] = Field(default_factory=list)
-
-
-# ---------------------------------------------------------------------------
-# 14. Survey and Complaints
-# ---------------------------------------------------------------------------
-
-
-class SurveyRequest(BaseModel):
-    """Survey request created for a completed ticket."""
-
-    survey_id: str | None = None
-    ticket_id: str | None = None
-    status: str | None = None
-
-
-class SurveySubmission(BaseModel):
-    """Survey response submitted by the user."""
-
-    survey_id: str
-    rating: int = Field(ge=1, le=5)
-    comment: str | None = None
-
-
-class ComplaintResponse(BaseModel):
-    """Complaint / support case created in the ERP."""
-
-    complaint_id: str | None = None
-    contact_id: str | None = None
-    status: str | None = None
-    message: str | None = None
-
-
-# ---------------------------------------------------------------------------
-# Establishment (additional)
-# ---------------------------------------------------------------------------
-
-
-class Establishment(BaseModel):
-    """Establishment / producer from the ERP catalog."""
-
-    establishment_id: str | None = None
-    name: str
-    type: str | None = None
-    description: str | None = None
-    address: str | None = None
-    latitude: float | None = None
-    longitude: float | None = None
-    payment_methods: list[str] = Field(default_factory=list)
-    status: str | None = None
-
-    @model_validator(mode="before")
-    @classmethod
-    def _normalize(cls, data: Any) -> Any:
-        if isinstance(data, dict):
-            # ERP sends "company_id" instead of "establishment_id"
-            if "establishment_id" not in data:
-                data["establishment_id"] = data.get(
-                    "company_id", data.get("id", data.get("name", ""))
-                )
-            # ERP sends "company_name" instead of "name"
-            if "company_name" in data and "name" not in data:
-                data["name"] = data["company_name"]
-        return data
 
 
 # ---------------------------------------------------------------------------

@@ -1,15 +1,3 @@
-"""Customer management tools – contacts, conversations and leads.
-
-ERP controllers: contact_controller, conversation_controller, lead_controller.
-
-Covers user stories: BOT-US-011, 012, 013, 038.
-
-Flow required before creating a lead:
-  1. resolve_or_create_contact  -> sets ctx.deps.contact_id
-  2. open_or_resume_conversation -> sets ctx.deps.conversation_id
-  3. upsert_lead
-"""
-
 from __future__ import annotations
 
 import logging
@@ -20,11 +8,11 @@ from pydantic_ai import RunContext
 from chatbot.ai_agent.dependencies import AgentDeps
 from chatbot.ai_agent.models import (
     ERP_BASE_PATH,
-    ContactInfo,
-    ConversationInfo,
     LeadInfo,
+    UpdateContactResult,
 )
 from chatbot.ai_agent.tools.erp_utils import extract_erp_data
+from chatbot.ai_agent.tools.utils import open_or_resume_conversation
 
 logger = logging.getLogger(__name__)
 
@@ -32,77 +20,28 @@ ERP_TIMEOUT_SECONDS = 15.0
 
 
 # ------------------------------------------------------------------
-# 1. Contact (contact_controller)
+# 1. Contact (contact_controller) – tools
 # ------------------------------------------------------------------
-
-
-async def resolve_or_create_contact(
-    ctx: RunContext[AgentDeps],
-    phone: str | None = None,
-    name: str | None = None,
-    email: str | None = None,
-) -> ContactInfo:
-    """Resolve an existing contact or create a new one by phone number.
-
-    The ERP deduplicates by phone/email so calling this function repeatedly
-    with the same phone is idempotent (BOT-US-011).
-
-    If no phone is provided, falls back to ``ctx.deps.user_phone``.
-
-    Args:
-        ctx: Agent run context with dependencies.
-        phone: WhatsApp / international phone number (e.g. "+598 99 000 001").
-        name: Contact display name (optional, used only on creation).
-        email: Contact email address (optional).
-    """
-    logger.debug(
-        "[resolve_or_create_contact] phone=%s name=%s email=%s",
-        phone,
-        name,
-        email,
-    )
-    resolved_phone: str = phone or ctx.deps.user_phone
-
-    payload: dict[str, Any] = {"phone": resolved_phone}
-    if name:
-        payload["name"] = name
-    if email:
-        payload["email"] = email
-
-    response = await ctx.deps.erp_client.post(
-        f"{ERP_BASE_PATH}.contact_controller.resolve_or_create_contact",
-        json=payload,
-        timeout=ERP_TIMEOUT_SECONDS,
-    )
-    response.raise_for_status()
-    data: dict[str, Any] = extract_erp_data(response.json())
-
-    contact = ContactInfo.model_validate(data)
-    # Keep deps in sync so subsequent tools can use contact_id directly
-    ctx.deps.contact_id = contact.contact_id
-    logger.debug("Contact resolved: %s (is_new=%s)", contact.contact_id, contact.is_new)
-    return contact
 
 
 async def update_contact(
     ctx: RunContext[AgentDeps],
-    idempotency_key: str = "optional-key-123",
     name: str | None = None,
     email: str | None = None,
     phone: str | None = None,
-) -> dict[str, Any]:
-    """Update allowed fields of the current contact (BOT-US-012).
+    idempotency_key: str = "optional-key-123",
+) -> UpdateContactResult | str:
+    """Update/Insert one or more fields of the current contact
 
-    Only fields explicitly provided are sent to the ERP; omitted fields are
-    left unchanged. The ERP audits every modification and returns the list of
-    changed fields plus an audit_event_id for traceability.
+    **IMPORTANT – pass only the fields you want to change.**
+
 
     Args:
         ctx: Agent run context with dependencies.
-        name: New display name for the contact.
-        email: New email address.
+        name: New display name (only if it differs from the current one).
+        email: New email address (only if it differs from the current one).
         phone: New phone number (use with caution – changes the dedup key).
-        idempotency_key: client-generated key to prevent duplicate
+        idempotency_key: Optional client-generated key to prevent duplicate
             updates on retries.
     """
     logger.debug(
@@ -114,6 +53,9 @@ async def update_contact(
     )
     if not ctx.deps.contact_id:
         raise ValueError("contact_id is required in AgentDeps to update a contact")
+
+    if not any([name, email, phone]):
+        return "No fields to update. Provide at least one of name, email, or phone."
 
     payload: dict[str, Any] = {
         "contact_id": ctx.deps.contact_id,
@@ -133,64 +75,28 @@ async def update_contact(
     )
     response.raise_for_status()
     data: dict[str, Any] = extract_erp_data(response.json())
+    result = UpdateContactResult.model_validate(data)
+
+    # Keep deps in sync with the updated values
+    updated_contact = result.contact
+    is_real_name = bool(
+        updated_contact.name
+        and updated_contact.name != updated_contact.phone
+        and updated_contact.name != (updated_contact.email or "")
+    )
+    if is_real_name:
+        ctx.deps.user_name = updated_contact.name
+    if updated_contact.email:
+        ctx.deps.user_email = updated_contact.email
+    if updated_contact.phone and ctx.deps.user_phone is None:  # Telegram
+        ctx.deps.user_phone = updated_contact.phone
 
     logger.debug(
         "Contact updated: %s – changed fields: %s",
         ctx.deps.contact_id,
-        data.get("changed_fields"),
+        result.changed_fields,
     )
-    return data
-
-
-# ------------------------------------------------------------------
-# 2. Conversation (conversation_controller)
-# ------------------------------------------------------------------
-
-
-async def open_or_resume_conversation(
-    ctx: RunContext[AgentDeps],
-    channel: str = "WhatsApp",
-) -> ConversationInfo:
-    """Open a new conversation or resume the active one for the current contact.
-
-    Must be called after ``resolve_or_create_contact`` and before
-    ``upsert_lead``. Stores the resulting conversation_id in
-    ``ctx.deps.conversation_id`` for use by subsequent tools.
-
-    Args:
-        ctx: Agent run context with dependencies.
-        channel: Communication channel (default "WhatsApp").
-    """
-    logger.debug(
-        "[open_or_resume_conversation] contact_id=%s channel=%s",
-        ctx.deps.contact_id,
-        channel,
-    )
-    if not ctx.deps.contact_id:
-        raise ValueError(
-            "contact_id is required in AgentDeps to open a conversation. Use 'resolve_or_create_contact' first"
-        )
-
-    response = await ctx.deps.erp_client.post(
-        f"{ERP_BASE_PATH}.conversation_controller.open_or_resume_conversation",
-        json={
-            "contact_id": ctx.deps.contact_id,
-            "channel": channel,
-            "status": "ACTIVE",
-        },
-        timeout=ERP_TIMEOUT_SECONDS,
-    )
-    response.raise_for_status()
-    data: dict[str, Any] = extract_erp_data(response.json())
-
-    conversation = ConversationInfo.model_validate(data)
-    ctx.deps.conversation_id = conversation.conversation_id
-    logger.debug(
-        "Conversation opened: %s (is_new=%s)",
-        conversation.conversation_id,
-        conversation.is_new,
-    )
-    return conversation
+    return result
 
 
 # ------------------------------------------------------------------
@@ -202,15 +108,15 @@ async def upsert_lead(
     ctx: RunContext[AgentDeps],
     interest_type: str = "Experience",
 ) -> LeadInfo:
-    """Create or update a CRM lead for the current contact (BOT-US-038).
+    conversation_id = ctx.deps.conversation_id
+    """Create or update a CRM lead for the current contact
 
     Called whenever a user shows commercial intent (asks about prices,
     availability, or booking) without completing a reservation. The ERP
     consolidates leads per contact to avoid duplicates.
 
     Requires ``contact_id`` and ``conversation_id`` in ``ctx.deps``.
-    Call ``resolve_or_create_contact`` and ``open_or_resume_conversation``
-    first if they are not set.
+    Call ``open_or_resume_conversation`` first if ``conversation_id`` is not set.
 
     Args:
         ctx: Agent run context with dependencies.
@@ -219,23 +125,20 @@ async def upsert_lead(
     logger.debug(
         "[upsert_lead] contact_id=%s conversation_id=%s interest_type=%s",
         ctx.deps.contact_id,
-        ctx.deps.conversation_id,
+        conversation_id,
         interest_type,
     )
     if not ctx.deps.contact_id:
-        raise ValueError(
-            "contact_id is required in AgentDeps to upsert a lead. Use 'resolve_or_create_contact' first"
-        )
-    if not ctx.deps.conversation_id:
-        raise ValueError(
-            "conversation_id is required in AgentDeps to upsert a lead. Use 'open_or_resume_conversation' first"
-        )
+        raise ValueError("contact_id is required in AgentDeps to upsert a lead")
+    if not conversation_id:
+        conversation = await open_or_resume_conversation(ctx)
+        conversation_id = conversation.conversation_id
 
     response = await ctx.deps.erp_client.post(
         f"{ERP_BASE_PATH}.lead_controller.upsert_lead",
         json={
             "contact_id": ctx.deps.contact_id,
-            "conversation_id": ctx.deps.conversation_id,
+            "conversation_id": conversation_id,
             "interest_type": interest_type,
             "status": "OPEN",
         },

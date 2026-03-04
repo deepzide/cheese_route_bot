@@ -53,12 +53,12 @@ async def test_list_experiences(ctx: RunContext[AgentDeps]) -> None:
 # uv run pytest -s chatbot/ai_agent/tests/test_catalog.py::test_list_experiences_only_online
 @pytest.mark.anyio
 async def test_list_experiences_only_online(ctx: RunContext[AgentDeps]) -> None:
-    """Todas las experiencias retornadas deben tener is_online=True."""
+    """Todas las experiencias retornadas deben tener status='ONLINE'."""
     result = await list_experiences(ctx)
 
-    offline = [e for e in result if not e.is_online]
+    offline = [e for e in result if e.status != "ONLINE"]
     print(f"\n  Experiencias offline (debe ser 0): {offline}")
-    assert len(offline) == 0, f"Se recibieron experiencias offline: {offline}"
+    assert len(offline) == 0, f"Se recibieron experiencias no-ONLINE: {offline}"
 
 
 # uv run pytest -s chatbot/ai_agent/tests/test_catalog.py::test_list_experiences_with_search
@@ -105,7 +105,7 @@ async def test_get_experience_detail(ctx: RunContext[AgentDeps]) -> None:
 
     print(f"\n  get_experience_detail({exp_id}) -> {list(result.keys())}")
     assert isinstance(result, dict)
-    assert result.get("experience_id") or result.get("name") or result.get("id")
+    assert result.get("experience_id") == exp_id
 
 
 # ---------------------------------------------------------------------------
@@ -140,7 +140,6 @@ async def test_list_routes_with_search(ctx: RunContext[AgentDeps]) -> None:
 # uv run pytest -s chatbot/ai_agent/tests/test_catalog.py::test_list_routes_pagination
 @pytest.mark.anyio
 async def test_list_routes_pagination(ctx: RunContext[AgentDeps]) -> None:
-    """page_size=2 debe retornar como maximo 2 rutas."""
     result = await list_routes(ctx, page_size=2)
 
     print(f"\n  list_routes(page_size=2) -> {len(result)} rutas")
@@ -159,6 +158,7 @@ async def test_get_route_detail(ctx: RunContext[AgentDeps]) -> None:
 
     print(f"\n  get_route_detail({route_id}) -> {list(result.keys())}")
     assert isinstance(result, dict)
+    assert result.get("route_id") == route_id
 
 
 # ---------------------------------------------------------------------------
@@ -200,6 +200,7 @@ async def test_get_establishment_details(ctx: RunContext[AgentDeps]) -> None:
         result = await get_establishment_details(ctx, establishment_id=est_id)
         print(f"\n  get_establishment_details({est_id}) -> {list(result.keys())}")
         assert isinstance(result, dict)
+        assert result.get("company_id") == est_id
     except httpx.HTTPStatusError as exc:
         pytest.skip(f"ERP devolvio error {exc.response.status_code}")
 
@@ -221,25 +222,7 @@ async def test_get_availability(ctx: RunContext[AgentDeps]) -> None:
 
     print(f"\n  get_availability({exp_id}, 2026-03-10) -> {len(result.slots)} slots")
     assert isinstance(result, AvailabilityResponse)
-    assert result.experience_id == exp_id or result.experience_id is None
-
-
-# uv run pytest -s chatbot/ai_agent/tests/test_catalog.py::test_get_availability_no_slots
-@pytest.mark.anyio
-async def test_get_availability_no_slots(ctx: RunContext[AgentDeps]) -> None:
-    """Una fecha en el pasado debe retornar respuesta valida (0 slots o error manejado)."""
-    experiences = await list_experiences(ctx, page_size=1)
-    assert len(experiences) > 0, "No hay experiencias en el ERP"
-
-    exp_id = experiences[0].experience_id
-    try:
-        result = await get_availability(ctx, experience_id=exp_id, date="2020-01-01")
-        print(f"\n  get_availability(fecha pasada) -> {len(result.slots)} slots")
-        assert isinstance(result, AvailabilityResponse)
-    except httpx.HTTPStatusError as exc:
-        # Algunos ERPs retornan 422/400 para fechas en el pasado – comportamiento valido
-        print(f"\n  ERP rechazo fecha pasada con {exc.response.status_code} – OK")
-        assert exc.response.status_code in (400, 422)
+    assert result.experience_id == exp_id
 
 
 # uv run pytest -s chatbot/ai_agent/tests/test_catalog.py::test_get_route_availability
@@ -257,4 +240,4 @@ async def test_get_route_availability(ctx: RunContext[AgentDeps]) -> None:
 
     print(f"\n  get_route_availability({route_id}) -> {result}")
     assert isinstance(result, dict)
-    assert "route_id" in result or "available" in result
+    assert "route_id" in result

@@ -17,6 +17,7 @@ wheels/
 # Development files
 command.txt
 notes.txt
+notes.md
 context/
 
 # Logs

@@ -25,6 +25,7 @@ class AgentDeps:
     webhook_context: WebhookContextManager
     user_phone: str = ""
     user_name: str | None = None
+    user_email: str | None = None
+    telegram_id: str | None = None
     contact_id: str | None = None
     conversation_id: str | None = None
-    conversation_language: str = "es"

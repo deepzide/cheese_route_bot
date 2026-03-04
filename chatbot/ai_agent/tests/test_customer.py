@@ -3,9 +3,10 @@
 """Functional tests for customer tools against the real ERP API.
 
 Controllers covered:
-  - contact_controller      (resolve_or_create_contact, update_contact)
+  - contact_controller      (update_contact)
   - conversation_controller (open_or_resume_conversation)
   - lead_controller         (upsert_lead)
+  - resolve_or_create_contact (instruction in chatbot.ai_agent.instructions)
 """
 
 from __future__ import annotations
@@ -15,107 +16,176 @@ import pytest
 from pydantic_ai import RunContext
 
 from chatbot.ai_agent.dependencies import AgentDeps
-from chatbot.ai_agent.models import ContactInfo, ConversationInfo, LeadInfo, LeadStatus
+from chatbot.ai_agent.instructions import resolve_or_create_contact
+from chatbot.ai_agent.models import (
+    ConversationInfo,
+    LeadInfo,
+    LeadStatus,
+    UpdateContactResult,
+)
 from chatbot.ai_agent.tools.customer import (
-    open_or_resume_conversation,
-    resolve_or_create_contact,
     update_contact,
     upsert_lead,
 )
+from chatbot.ai_agent.tools.utils import open_or_resume_conversation
 
 # Rango de telefonos reservado para estos tests: +598 99 100 0xx
 _BASE_PHONE = "+598 99 100 0"
 
 
 # ---------------------------------------------------------------------------
-# contact_controller
+# instruction: resolve_or_create_contact
 # ---------------------------------------------------------------------------
 
 
-# uv run pytest -s chatbot/ai_agent/tests/test_customer.py::test_resolve_or_create_contact
+# uv run pytest -s chatbot/ai_agent/tests/test_customer.py::test_resolve_or_create_contact_returns_string
 @pytest.mark.anyio
-async def test_resolve_or_create_contact(ctx: RunContext[AgentDeps]) -> None:
-    """Debe retornar un ContactInfo con contact_id valido."""
-    result = await resolve_or_create_contact(
-        ctx, phone=f"{_BASE_PHONE}01", name="Test Catalog User"
-    )
+async def test_resolve_or_create_contact_returns_string(
+    ctx: RunContext[AgentDeps],
+) -> None:
+    """Debe retornar un string con los datos del cliente para el prompt."""
+    ctx.deps.user_phone = f"{_BASE_PHONE}01"
 
-    print(f"\n  resolve_or_create_contact -> {result}")
-    assert isinstance(result, ContactInfo)
-    assert result.contact_id
-    assert ctx.deps.contact_id == result.contact_id
+    result = await resolve_or_create_contact(ctx)
+
+    print(f"\n  resolve_or_create_contact -> {result!r}")
+    assert isinstance(result, str)
+    assert "## Datos del cliente" in result
+
+
+# uv run pytest -s chatbot/ai_agent/tests/test_customer.py::test_resolve_or_create_contact_sets_contact_id
+@pytest.mark.anyio
+async def test_resolve_or_create_contact_sets_contact_id(
+    ctx: RunContext[AgentDeps],
+) -> None:
+    """Debe poblar ctx.deps.contact_id tras la llamada."""
+    ctx.deps.user_phone = f"{_BASE_PHONE}02"
+    ctx.deps.contact_id = None
+
+    await resolve_or_create_contact(ctx)
+
+    print(f"\n  contact_id despues de @instruction: {ctx.deps.contact_id}")
+    assert ctx.deps.contact_id is not None
 
 
 # uv run pytest -s chatbot/ai_agent/tests/test_customer.py::test_resolve_or_create_contact_idempotent
 @pytest.mark.anyio
 async def test_resolve_or_create_contact_idempotent(ctx: RunContext[AgentDeps]) -> None:
-    """Llamar dos veces con el mismo telefono debe retornar el mismo contact_id."""
-    phone = f"{_BASE_PHONE}02"
-
-    first = await resolve_or_create_contact(ctx, phone=phone)
-    second = await resolve_or_create_contact(ctx, phone=phone)
-
-    print(f"\n  1ra llamada: {first.contact_id} | 2da llamada: {second.contact_id}")
-    assert first.contact_id == second.contact_id
-
-
-# uv run pytest -s chatbot/ai_agent/tests/test_customer.py::test_resolve_contact_uses_user_phone
-@pytest.mark.anyio
-async def test_resolve_contact_uses_user_phone(ctx: RunContext[AgentDeps]) -> None:
-    """Sin argumento phone, debe usar ctx.deps.user_phone."""
+    """Llamar dos veces con el mismo telefono debe poblar el mismo contact_id."""
     ctx.deps.user_phone = f"{_BASE_PHONE}03"
 
-    result = await resolve_or_create_contact(ctx)
+    await resolve_or_create_contact(ctx)
+    first_contact_id = ctx.deps.contact_id
 
-    print(f"\n  Resolvio con user_phone={ctx.deps.user_phone} -> {result.contact_id}")
-    assert isinstance(result, ContactInfo)
-    assert result.contact_id
+    ctx.deps.contact_id = None
+    await resolve_or_create_contact(ctx)
+    second_contact_id = ctx.deps.contact_id
+
+    print(f"\n  1ra llamada: {first_contact_id} | 2da llamada: {second_contact_id}")
+    assert first_contact_id == second_contact_id
 
 
-# uv run pytest -s chatbot/ai_agent/tests/test_customer.py::test_resolve_contact_is_new_flag
+# uv run pytest -s chatbot/ai_agent/tests/test_customer.py::test_resolve_or_create_contact_no_name_when_phone_equals_name
 @pytest.mark.anyio
-async def test_resolve_contact_is_new_flag(ctx: RunContext[AgentDeps]) -> None:
-    """El campo is_new debe ser bool o None (no importa el valor en runs sucesivos)."""
-    result = await resolve_or_create_contact(
-        ctx, phone=f"{_BASE_PHONE}04", name="Brand New Contact"
+async def test_resolve_or_create_contact_no_name_when_phone_equals_name(
+    ctx: RunContext[AgentDeps],
+) -> None:
+    """Si full_name == phone, no debe poblar ctx.deps.user_name."""
+    phone = f"{_BASE_PHONE}04"
+    ctx.deps.user_phone = phone
+    ctx.deps.user_name = None
+
+    await resolve_or_create_contact(ctx)
+
+    # Si el ERP devolvio full_name == phone, user_name debe quedar None
+    if ctx.deps.user_name is not None:
+        assert ctx.deps.user_name != phone, "user_name no debe ser igual al telefono"
+
+
+# uv run pytest -s chatbot/ai_agent/tests/test_customer.py::test_resolve_or_create_contact_with_name
+@pytest.mark.anyio
+async def test_resolve_or_create_contact_with_name(
+    ctx: RunContext[AgentDeps],
+) -> None:
+    """Con nombre real, debe poblar ctx.deps.user_name y mencionarlo en el prompt."""
+    phone = f"{_BASE_PHONE}16"
+    TEST_NAME = "Juan Pedro"
+    ctx.deps.user_phone = phone
+    await resolve_or_create_contact(ctx)
+    await update_contact(ctx, name=TEST_NAME)
+
+    assert ctx.deps.user_name == TEST_NAME, (
+        "El nombre actualizado no se reflejo en deps"
     )
 
-    print(f"\n  is_new={result.is_new} para telefono +598 99 100 004")
-    # El ERP puede omitir is_new; si lo incluye debe ser bool
-    assert result.is_new is None or isinstance(result.is_new, bool)
+    # Reseteamos user_name para verificar que se repone
+    ctx.deps.user_name = None
+    result = await resolve_or_create_contact(ctx)
+    assert ctx.deps.user_name == TEST_NAME
+    assert TEST_NAME in result
+    print(f"\n  prompt={result!r}  user_name={ctx.deps.user_name}")
+
+
+# uv run pytest -s chatbot/ai_agent/tests/test_customer.py::test_resolve_or_create_contact_no_phone
+@pytest.mark.anyio
+async def test_resolve_or_create_contact_no_phone(
+    ctx: RunContext[AgentDeps],
+) -> None:
+    """Sin phone ni telegram_id, debe lanzar ValueError."""
+    ctx.deps.user_phone = ""
+    ctx.deps.telegram_id = None
+
+    with pytest.raises(ValueError, match="No phone"):
+        await resolve_or_create_contact(ctx)
+
+    print("\n  ValueError lanzado correctamente sin phone ni telegram_id")
+
+
+# ---------------------------------------------------------------------------
+# contact_controller – update_contact
+# ---------------------------------------------------------------------------
 
 
 # uv run pytest -s chatbot/ai_agent/tests/test_customer.py::test_update_contact_name
 @pytest.mark.anyio
 async def test_update_contact_name(ctx: RunContext[AgentDeps]) -> None:
     """Debe actualizar el nombre del contacto y retornar changed_fields."""
+    ctx.deps.user_phone = f"{_BASE_PHONE}06"
     try:
-        await resolve_or_create_contact(ctx, phone=f"{_BASE_PHONE}05", name="Antes")
+        await resolve_or_create_contact(ctx)
     except httpx.HTTPStatusError as exc:
         pytest.skip(f"ERP devolvio error en setup: {exc.response.status_code}")
 
-    result = await update_contact(ctx, name="Despues")
+    try:
+        result = await update_contact(ctx, name="Despues")
+    except httpx.HTTPStatusError as exc:
+        pytest.skip(f"ERP devolvio error en update: {exc.response.status_code}")
 
-    print(f"\n  update_contact -> changed_fields={result.get('changed_fields')}")
-    assert isinstance(result, dict)
-    assert "changed_fields" in result
-    assert result.get("audit_event_id")
+    assert isinstance(result, UpdateContactResult)
+    print(f"\n  update_contact -> changed_fields={result.changed_fields}")
+    assert "full_name" in result.changed_fields or "name" in result.changed_fields
+    assert result.contact.name == "Despues"
 
 
 # uv run pytest -s chatbot/ai_agent/tests/test_customer.py::test_update_contact_email
 @pytest.mark.anyio
 async def test_update_contact_email(ctx: RunContext[AgentDeps]) -> None:
     """Debe actualizar el email y registrarlo en changed_fields."""
+    ctx.deps.user_phone = f"{_BASE_PHONE}07"
     try:
-        await resolve_or_create_contact(ctx, phone=f"{_BASE_PHONE}06")
+        await resolve_or_create_contact(ctx)
     except httpx.HTTPStatusError as exc:
         pytest.skip(f"ERP devolvio error en setup: {exc.response.status_code}")
 
-    result = await update_contact(ctx, email="test@example.com")
+    try:
+        result = await update_contact(ctx, email="test@example.com")
+    except httpx.HTTPStatusError as exc:
+        pytest.skip(f"ERP devolvio error en update: {exc.response.status_code}")
 
-    print(f"\n  update_contact(email) -> changed_fields={result.get('changed_fields')}")
-    assert isinstance(result, dict)
-    assert "changed_fields" in result
+    assert isinstance(result, UpdateContactResult)
+    print(f"\n  update_contact(email) -> changed_fields={result.changed_fields}")
+    assert "email" in result.changed_fields
+    assert result.contact.email == "test@example.com"
 
 
 # uv run pytest -s chatbot/ai_agent/tests/test_customer.py::test_update_contact_requires_contact_id
@@ -133,11 +203,17 @@ async def test_update_contact_requires_contact_id(ctx: RunContext[AgentDeps]) ->
 # ---------------------------------------------------------------------------
 
 
+# ---------------------------------------------------------------------------
+# conversation_controller
+# ---------------------------------------------------------------------------
+
+
 # uv run pytest -s chatbot/ai_agent/tests/test_customer.py::test_open_or_resume_conversation
 @pytest.mark.anyio
 async def test_open_or_resume_conversation(ctx: RunContext[AgentDeps]) -> None:
     """Debe retornar un ConversationInfo con conversation_id valido."""
-    await resolve_or_create_contact(ctx, phone=f"{_BASE_PHONE}07")
+    ctx.deps.user_phone = f"{_BASE_PHONE}08"
+    await resolve_or_create_contact(ctx)
 
     try:
         result = await open_or_resume_conversation(ctx)
@@ -156,7 +232,8 @@ async def test_open_or_resume_conversation_idempotent(
     ctx: RunContext[AgentDeps],
 ) -> None:
     """Abrir la conversacion dos veces debe retornar la misma (is_new=False la 2da vez)."""
-    await resolve_or_create_contact(ctx, phone=f"{_BASE_PHONE}08")
+    ctx.deps.user_phone = f"{_BASE_PHONE}09"
+    await resolve_or_create_contact(ctx)
 
     try:
         first = await open_or_resume_conversation(ctx)
@@ -168,8 +245,7 @@ async def test_open_or_resume_conversation_idempotent(
     # El ERP puede crear una nueva o reusar la activa – ambas son validas
     assert first.conversation_id
     assert second.conversation_id
-    if second.is_new is not None:
-        assert second.is_new is False
+    assert second.is_new is False
 
 
 # uv run pytest -s chatbot/ai_agent/tests/test_customer.py::test_open_conversation_requires_contact_id
@@ -189,17 +265,17 @@ async def test_open_conversation_requires_contact_id(
 # ---------------------------------------------------------------------------
 
 
+# ---------------------------------------------------------------------------
+# lead_controller
+# ---------------------------------------------------------------------------
+
+
 # uv run pytest -s chatbot/ai_agent/tests/test_customer.py::test_upsert_lead
 @pytest.mark.anyio
 async def test_upsert_lead(ctx: RunContext[AgentDeps]) -> None:
     """Debe crear/actualizar un lead y retornar LeadInfo con status OPEN."""
-    await resolve_or_create_contact(ctx, phone=f"{_BASE_PHONE}09")
-
-    try:
-        await open_or_resume_conversation(ctx)
-    except httpx.HTTPStatusError as exc:
-        pytest.skip(f"ERP devolvio error en conversacion: {exc.response.status_code}")
-
+    ctx.deps.user_phone = f"{_BASE_PHONE}10"
+    await resolve_or_create_contact(ctx)
     result = await upsert_lead(ctx, interest_type="Experience")
 
     print(f"\n  upsert_lead -> {result}")
@@ -212,12 +288,8 @@ async def test_upsert_lead(ctx: RunContext[AgentDeps]) -> None:
 @pytest.mark.anyio
 async def test_upsert_lead_idempotent(ctx: RunContext[AgentDeps]) -> None:
     """Llamar upsert_lead dos veces no debe crear duplicados (mismo lead_id o OPEN)."""
-    await resolve_or_create_contact(ctx, phone=f"{_BASE_PHONE}10")
-
-    try:
-        await open_or_resume_conversation(ctx)
-    except httpx.HTTPStatusError as exc:
-        pytest.skip(f"ERP devolvio error en conversacion: {exc.response.status_code}")
+    ctx.deps.user_phone = f"{_BASE_PHONE}11"
+    await resolve_or_create_contact(ctx)
 
     first = await upsert_lead(ctx, interest_type="Route")
     second = await upsert_lead(ctx, interest_type="Route")
@@ -238,12 +310,19 @@ async def test_upsert_lead_requires_contact_id(ctx: RunContext[AgentDeps]) -> No
         await upsert_lead(ctx)
 
 
-# uv run pytest -s chatbot/ai_agent/tests/test_customer.py::test_upsert_lead_requires_conversation_id
+# uv run pytest -s chatbot/ai_agent/tests/test_customer.py::test_update_contact_syncs_user_name_in_deps
 @pytest.mark.anyio
-async def test_upsert_lead_requires_conversation_id(ctx: RunContext[AgentDeps]) -> None:
-    """Debe lanzar ValueError si conversation_id no esta en deps."""
-    ctx.deps.contact_id = "CONT-FAKE"
-    ctx.deps.conversation_id = None
+async def test_update_contact_syncs_user_name_in_deps(
+    ctx: RunContext[AgentDeps],
+) -> None:
+    """Tras update_contact con nombre, ctx.deps.user_name debe actualizarse."""
+    ctx.deps.user_phone = f"{_BASE_PHONE}12"
+    try:
+        await resolve_or_create_contact(ctx)
+    except httpx.HTTPStatusError as exc:
+        pytest.skip(f"ERP devolvio error en setup: {exc.response.status_code}")
 
-    with pytest.raises(ValueError, match="conversation_id"):
-        await upsert_lead(ctx)
+    ctx.deps.user_name = None
+    result = await update_contact(ctx, name="Nombre Actualizado")
+    assert isinstance(result, UpdateContactResult)
+    assert ctx.deps.user_name == "Nombre Actualizado"

@@ -1,24 +1,34 @@
 import logging
 
+import httpx
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Request
 from fastapi.responses import PlainTextResponse
+from pydantic_ai import AgentRunResult
+from pydantic_ai.messages import ModelResponse, ToolCallPart
 
+from chatbot.ai_agent import get_cheese_agent
+from chatbot.ai_agent.context import webhook_context_manager
+from chatbot.ai_agent.dependencies import AgentDeps
 from chatbot.api.utils import message_handler
 from chatbot.api.utils.message_queue import Message, message_queue
-from chatbot.api.utils.session_manager import session_manager
 from chatbot.api.utils.webhook_parser import extract_message_content
 from chatbot.core.config import config
+from chatbot.db.services import services
+from chatbot.messaging.telegram_notifier import notify_error
 from chatbot.messaging.whatsapp import whatsapp_manager
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
 ERROR_STATUS = {"status": "error"}
 OK_STATUS = {"status": "ok"}
-ERP_ERROR_MSG = "Error de conexion con el ERP. Vuelva a intentarlo mas tarde"
-AI_ERROR_MSG = (
-    "Explicale al usuario la causa del error y recomiendale "
-    "como evitar que vuelva a suceder sin entrar en detalles tecnicos."
-    "Dile que si el error persiste puede reiniciar el chat escribiendo '/restart'"
+USER_ERROR_MSG = "Ocurrio un error al procesar tu mensaje. Por favor intentalo de nuevo o escribe /restart para reiniciar el chat."
+erp_client: httpx.AsyncClient = httpx.AsyncClient(
+    base_url=config.ERP_HOST,
+    headers={
+        "Authorization": f"token {config.ERP_API_TOKEN}",
+        "Content-Type": "application/json",
+    },
+    timeout=15.0,
 )
 
 
@@ -45,6 +55,17 @@ async def verify_webhook(request: Request):
         raise HTTPException(status_code=500, detail="Internal Server Error")
 
 
+def _extract_tools_used(result: AgentRunResult[str]) -> list[str]:
+    """Extract tool names called during the agent run."""
+    tools: list[str] = []
+    for msg in result.all_messages():
+        if isinstance(msg, ModelResponse):
+            for part in msg.parts:
+                if isinstance(part, ToolCallPart):
+                    tools.append(part.tool_name)
+    return tools
+
+
 async def _process_message(message: Message) -> None:
     """Process a single message from the queue sequentially per user."""
     user_number = message.user_number
@@ -55,31 +76,55 @@ async def _process_message(message: Message) -> None:
         logger.error("No message_id provided for WhatsApp message")
         return
 
-    await whatsapp_manager.mark_read(message_id)  # marcar como leído
-    await whatsapp_manager.send_typing_indicator(message_id)  # escribiendo...
+    await whatsapp_manager.mark_read(message_id)
+    await whatsapp_manager.send_typing_indicator(message_id)
 
     try:
         if incoming_msg.lower() == "/restart":
-            logger.info(f"'/restart' requested by {user_number}")
-            #agent.chat_memory.delete_chat(user_number)
+            logger.info("'/restart' requested by %s", user_number)
+            await services.reset_chat(user_number)
             await whatsapp_manager.send_text(
                 user_number=user_number, text="Chat reiniciado", message_id=message_id
             )
             return
 
-        logger.info("=" * 100)
-        logger.info(f"{user_number}: {incoming_msg}")
+        logger.info("=" * 80)
+        logger.info("%s: %s", user_number, incoming_msg)
 
         await message_handler.save_user_msg(user_number, incoming_msg)
 
-        """ await message_handler.save_assistant_msg(user_number, ai_response, tools_used)
+        deps = AgentDeps(
+            erp_client=erp_client,
+            db_services=services,
+            whatsapp_client=whatsapp_manager,
+            webhook_context=webhook_context_manager,
+            user_phone=user_number,
+        )
+
+        agent = get_cheese_agent()
+        history = await services.get_pydantic_ai_history(user_number, hours=24)
+        result = await agent.run(incoming_msg, deps=deps, message_history=history)
+
+        ai_response: str = result.output
+        tools_used = _extract_tools_used(result)
+
+        logger.info("Agent response for %s: %s", user_number, ai_response[:120])
+        logger.debug("Tools used: %s", tools_used)
+
+        await message_handler.save_assistant_msg(user_number, ai_response, tools_used)
         await whatsapp_manager.send_text(
             user_number=user_number, text=ai_response, message_id=message_id
-        ) """
+        )
 
-    finally:
-        session_manager.touch_user(user_number)
-        await session_manager.cleanup_inactive()
+    except Exception as exc:
+        logger.exception("Error processing message for %s: %s", user_number, exc)
+        await notify_error(
+            exc,
+            context=f"_process_message | user={user_number} | msg={incoming_msg[:80]}",
+        )
+        await whatsapp_manager.send_text(
+            user_number=user_number, text=USER_ERROR_MSG, message_id=message_id
+        )
 
 
 @router.post("")
@@ -97,11 +142,8 @@ async def whatsapp_reply(request: Request, background_tasks: BackgroundTasks):
 
     user_number, incoming_msg, message_id = message_data
 
-    # Create message and enqueue it
     msg = Message(user_number=user_number, content=incoming_msg, message_id=message_id)
     await message_queue.enqueue(msg)
-
-    # Start processing queue for this user if not already running
     await message_queue.start_processing(user_number, _process_message)
 
     # Notify user if queue is building up

@@ -12,6 +12,7 @@ from chatbot.ai_agent.context import webhook_context_manager
 from chatbot.ai_agent.dependencies import AgentDeps
 from chatbot.api.utils import message_handler
 from chatbot.api.utils.message_queue import Message, message_queue
+from chatbot.api.utils.text import strip_markdown
 from chatbot.api.utils.webhook_parser import extract_message_content
 from chatbot.core.config import config
 from chatbot.db.services import services
@@ -107,11 +108,11 @@ async def _process_message(message: Message) -> None:
         history = await services.get_pydantic_ai_history(user_number, hours=24)
         result = await agent.run(incoming_msg, deps=deps, message_history=history)
 
-        ai_response: str = result.output
+        ai_response: str = strip_markdown(result.output)
         tools_used = _extract_tools_used(result)
 
-        logger.info("🤖 Agent response for %s: %s", user_number, ai_response[:120])
-        logger.debug("🔧 Tools used: %s", tools_used)
+        logger.info("🤖 Agent response for %s: %s", user_number, ai_response)
+        logger.info("🔧 Tools used: %s", tools_used)
 
         await message_handler.save_assistant_msg(user_number, ai_response, tools_used)
         await whatsapp_manager.send_text(

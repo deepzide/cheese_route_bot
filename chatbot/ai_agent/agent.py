@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+from datetime import datetime, timezone
 
 from pydantic_ai import Agent, RunContext
 
@@ -63,7 +64,19 @@ def get_cheese_agent() -> Agent[AgentDeps, str]:
             tools=AGENT_TOOLS,
         )
 
-        """ @_cheese_agent.instructions
+        @_cheese_agent.instructions
+        def current_datetime_prompt(
+            ctx: RunContext[AgentDeps],
+        ) -> str:
+            now = datetime.now(tz=timezone.utc).astimezone()
+            return (
+                f"Fecha y hora actual: {now.strftime('%A %d de %B de %Y, %H:%M')} "
+                f"(zona horaria del servidor: {now.strftime('%Z %z')}). "
+                "Usa esta fecha para resolver expresiones como mañana, la semana que viene, "
+                "el mes que viene, dentro de N días, etc."
+            )
+
+        @_cheese_agent.instructions
         async def resolve_or_create_contact_instruction(
             ctx: RunContext[AgentDeps],
         ) -> str:
@@ -96,7 +109,7 @@ def get_cheese_agent() -> Agent[AgentDeps, str]:
                     establishment.model_dump_json()
                     for establishment in establishment_list
                 ]
-            ) """
+            )
 
         logger.info("Cheese agent initialized with %d tools", len(AGENT_TOOLS))
     return _cheese_agent

@@ -85,7 +85,6 @@ def deps(erp_client: httpx.AsyncClient) -> AgentDeps:
         user_name=None,
         contact_id=None,
         conversation_id=None,
-        conversation_language="es",
     )
 
 

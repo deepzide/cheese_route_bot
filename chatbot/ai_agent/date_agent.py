@@ -27,6 +27,7 @@ from dotenv import load_dotenv
 from pydantic import BaseModel
 from pydantic_ai import Agent
 from pydantic_ai.providers.google import GoogleProvider
+from pydantic_ai.settings import ModelSettings
 
 from chatbot.ai_agent.models import GoogleModel
 
@@ -94,6 +95,7 @@ def get_date_agent() -> Agent[None, DateResolution]:
             model=GoogleModel.Gemini_3_Flash_Preview,
             system_prompt=_DATE_SYSTEM_PROMPT,
             output_type=DateResolution,
+            model_settings=ModelSettings(temperature=0),
         )
         logger.info("Date agent initialized")
     return _date_agent
@@ -140,6 +142,7 @@ async def run_date_agent(query: str) -> DateResolution:
             model=google_model,
             system_prompt=_DATE_SYSTEM_PROMPT,
             output_type=DateResolution,
+            model_settings=ModelSettings(temperature=0),
         )
         result = await agent.run(date_context)
         del agent  # release the agent and its internal state from memory

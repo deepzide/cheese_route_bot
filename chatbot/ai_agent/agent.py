@@ -5,6 +5,7 @@ import logging
 from datetime import datetime, timezone
 
 from pydantic_ai import Agent, RunContext
+from pydantic_ai.settings import ModelSettings
 
 from chatbot.ai_agent.dependencies import AgentDeps
 from chatbot.ai_agent.instructions import resolve_or_create_contact
@@ -65,6 +66,7 @@ def get_cheese_agent() -> Agent[AgentDeps, str]:
             system_prompt=SYSTEM_PROMPT,
             deps_type=AgentDeps,
             tools=AGENT_TOOLS,
+            model_settings=ModelSettings(temperature=0),
         )
 
         @_cheese_agent.instructions

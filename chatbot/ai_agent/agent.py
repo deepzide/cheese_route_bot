@@ -24,6 +24,7 @@ from chatbot.ai_agent.tools.customer import (
     update_contact,
     upsert_lead,
 )
+from chatbot.ai_agent.tools.date_resolver import resolve_relative_date
 
 logger = logging.getLogger(__name__)
 ERP_TIMEOUT_SECONDS = 15.0
@@ -43,6 +44,8 @@ AGENT_TOOLS = [
     # Customer / CRM (contact resolution runs as system_prompt instruction)
     update_contact,
     upsert_lead,
+    # Date resolution sub-agent
+    resolve_relative_date,
 ]
 
 

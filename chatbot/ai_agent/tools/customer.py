@@ -30,10 +30,9 @@ async def update_contact(
     email: str | None = None,
     phone: str | None = None,
 ) -> UpdateContactResult | str:
-    """Update/Insert one or more fields of the current contact
+    """Update one or more fields of the current contact.
 
-    **IMPORTANT – pass only the fields you want to change.**
-
+    Pass only the fields you want to change; omit those that already have the correct value.
 
     Args:
         ctx: Agent run context with dependencies.
@@ -102,15 +101,11 @@ async def upsert_lead(
     ctx: RunContext[AgentDeps],
     interest_type: str = "Experience",
 ) -> LeadInfo:
-    conversation_id = ctx.deps.conversation_id
-    """Create or update a CRM lead for the current contact
+    """Create or update a CRM lead for the current contact.
 
     Called whenever a user shows commercial intent (asks about prices,
     availability, or booking) without completing a reservation. The ERP
     consolidates leads per contact to avoid duplicates.
-
-    Requires ``contact_id`` and ``conversation_id`` in ``ctx.deps``.
-    Call ``open_or_resume_conversation`` first if ``conversation_id`` is not set.
 
     Args:
         ctx: Agent run context with dependencies.
@@ -119,20 +114,19 @@ async def upsert_lead(
     logger.info(
         "[upsert_lead] contact_id=%s conversation_id=%s interest_type=%s",
         ctx.deps.contact_id,
-        conversation_id,
+        ctx.deps.conversation_id,
         interest_type,
     )
     if not ctx.deps.contact_id:
         raise ValueError("contact_id is required in AgentDeps to upsert a lead")
-    if not conversation_id:
-        conversation = await open_or_resume_conversation(ctx)
-        conversation_id = conversation.conversation_id
+    if not ctx.deps.conversation_id:
+        await open_or_resume_conversation(ctx)
 
     response = await ctx.deps.erp_client.post(
         f"{ERP_BASE_PATH}.lead_controller.upsert_lead",
         json={
             "contact_id": ctx.deps.contact_id,
-            "conversation_id": conversation_id,
+            "conversation_id": ctx.deps.conversation_id,
             "interest_type": interest_type,
             "status": "OPEN",
         },

@@ -30,7 +30,7 @@ from chatbot.ai_agent.tools.customer import (
 from chatbot.ai_agent.tools.utils import open_or_resume_conversation
 
 # Rango de telefonos reservado para estos tests: +598 99 100 0xx
-_BASE_PHONE = "+598 99 100 0"
+_BASE_PHONE = "+123456998"
 
 
 # ---------------------------------------------------------------------------

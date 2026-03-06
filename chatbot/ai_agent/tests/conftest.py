@@ -23,6 +23,19 @@ from chatbot.ai_agent.models import ERP_BASE_PATH
 from chatbot.core.config import config
 
 # ---------------------------------------------------------------------------
+# anyio: use a single session-scoped event loop so pydantic-ai's cached async
+# HTTP client (Google SDK) doesn't get attached to a closed event loop between
+# individual tests.
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture(scope="session")
+def anyio_backend() -> str:
+    """Force anyio to use asyncio with a session-scoped event loop."""
+    return "asyncio"
+
+
+# ---------------------------------------------------------------------------
 # Stub collaborators (not needed for ERP tests)
 # ---------------------------------------------------------------------------
 

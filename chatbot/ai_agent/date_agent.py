@@ -108,7 +108,7 @@ async def run_date_agent(query: str) -> DateResolution:
     """Interpret a relative date expression and return the resolved date.
 
     Args:
-        query: A natural-language relative date expression in Spanish,
+        query: A natural-language relative date expression,
                e.g. "mañana", "dentro de 3 días", "la semana que viene".
 
     Returns:

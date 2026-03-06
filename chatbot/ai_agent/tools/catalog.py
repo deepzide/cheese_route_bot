@@ -40,6 +40,7 @@ async def list_experiences(
     package_mode: str | None = None,
     search: str | None = None,
     date: str | None = None,
+    establishment_id: str | None = None,
 ) -> list[Experience]:
     """List bookable experiences from the ERP catalog.
 
@@ -53,14 +54,16 @@ async def list_experiences(
         package_mode: Filter by "Both", "Public", or "Package".
         search: Keyword for searching in title and description.
         date: Availability date (YYYY-MM-DD).
+        establishment_id: Filter experiences belonging to a specific establishment.
     """
     logger.info(
-        "[list_experiences] page=%s page_size=%s package_mode=%s search=%s date=%s",
+        "[list_experiences] page=%s page_size=%s package_mode=%s search=%s date=%s establishment_id=%s",
         page,
         page_size,
         package_mode,
         search,
         date,
+        establishment_id,
     )
     payload: dict[str, Any] = {
         "page": page,
@@ -75,6 +78,8 @@ async def list_experiences(
         payload["search"] = search
     if date:
         payload["date"] = date
+    if establishment_id:
+        payload["establishment_id"] = establishment_id
 
     response = await ctx.deps.erp_client.post(
         f"{ERP_BASE_PATH}.experience_controller.list_experiences",
@@ -130,9 +135,7 @@ async def list_routes(
         page_size: Maximum routes to fetch (default 20).
         search: Keyword for searching in route names and descriptions.
     """
-    logger.info(
-        "[list_routes] page=%s page_size=%s search=%s", page, page_size, search
-    )
+    logger.info("[list_routes] page=%s page_size=%s search=%s", page, page_size, search)
     payload: dict[str, Any] = {
         "page": page,
         "page_size": page_size,

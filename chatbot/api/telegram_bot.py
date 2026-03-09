@@ -43,6 +43,7 @@ from chatbot.api.utils.telegram_commands import (
 from chatbot.core.config import config
 from chatbot.core.logging_conf import init_logging
 from chatbot.db.services import services
+from chatbot.erp.client import build_erp_client
 from chatbot.messaging.telegram_notifier import notify_error
 from chatbot.messaging.whatsapp import WhatsAppClient
 
@@ -174,14 +175,7 @@ async def _post_init(application: Application) -> None:
     init_logging()
     logger.info("🤖 Telegram bot starting up")
     await services.database.connect()
-    erp_client = httpx.AsyncClient(
-        base_url=config.ERP_HOST,
-        headers={
-            "Authorization": f"token {config.ERP_API_TOKEN}",
-            "Content-Type": "application/json",
-        },
-        timeout=15.0,
-    )
+    erp_client = build_erp_client()
     telegram_commands.init(erp_client)
     logger.info("✅ DB connected and ERP client ready")
 

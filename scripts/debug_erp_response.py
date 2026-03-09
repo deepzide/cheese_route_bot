@@ -2,21 +2,17 @@
 
 import asyncio
 import json
+import sys
+from pathlib import Path
 
-import httpx
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from chatbot.ai_agent.models import ERP_BASE_PATH
-from chatbot.core.config import config
+from chatbot.ai_agent.models import ERP_BASE_PATH  # noqa: E402
+from chatbot.erp.client import build_erp_client  # noqa: E402
 
 
 async def debug() -> None:
-    async with httpx.AsyncClient(
-        headers={
-            "Authorization": f"token {config.ERP_API_TOKEN}",
-            "Content-Type": "application/json",
-        },
-        timeout=15.0,
-    ) as client:
+    async with build_erp_client() as client:
         endpoints = [
             ("list_routes", "route_controller.list_routes", {}),
             (
@@ -27,7 +23,11 @@ async def debug() -> None:
             (
                 "get_availability",
                 "availability_controller.get_availability",
-                {"experience_id": "City Tour Experience", "date": "2026-04-15"},
+                {
+                    "experience_id": "EXP_CREMERIE",
+                    "date_from": "-03-2026",
+                    "date_to": "31-12-2026",
+                },
             ),
         ]
 

@@ -230,23 +230,27 @@ async def get_establishment_details(
 async def get_availability(
     ctx: RunContext[AgentDeps],
     experience_id: str,
-    date: str,
+    date_from: str,
+    date_to: str,
 ) -> AvailabilityResponse:
-    """Check real-time availability for an experience on a given date.
+    """Check real-time availability for an experience over a date range.
 
     Args:
         ctx: Agent run context with dependencies.
         experience_id: ERP id of the experience.
-        date: ISO-format date string (YYYY-MM-DD).
+        date_from: Start date in DD-MM-YYYY format (e.g. "01-03-2026").
+        date_to: End date in DD-MM-YYYY format (e.g. "31-12-2026").
     """
     logger.info(
-        "[get_availability] experience_id=%s date=%s",
+        "[get_availability] experience_id=%s date_from=%s date_to=%s",
         experience_id,
-        date,
+        date_from,
+        date_to,
     )
     payload: dict[str, Any] = {
         "experience_id": experience_id,
-        "date": date,
+        "date_from": date_from,
+        "date_to": date_to,
     }
 
     response = await ctx.deps.erp_client.post(

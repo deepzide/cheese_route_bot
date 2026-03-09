@@ -11,7 +11,7 @@ Commands registered:
   /get_route_detail          <id>
   /list_establishments
   /get_establishment_details <id>
-  /get_availability          <experience_id> <fecha>
+  /get_availability          <experience_id> <date_from DD-MM-YYYY> <date_to DD-MM-YYYY>
   /get_route_availability    <route_id> <fecha> <personas>
   /resolve_or_create_contact
   /update_contact            nombre=X  email=X  telefono=X
@@ -367,36 +367,37 @@ async def cmd_get_establishment_details(
 
 
 # ---------------------------------------------------------------------------
-# /get_availability <experience_id> <fecha>
-# ---------------------------------------------------------------------------
+# /get_availability <experience_id> <date_from DD-MM-YYYY> <date_to DD-MM-YYYY>
 
 
 async def cmd_get_availability(
     update: Update, context: ContextTypes.DEFAULT_TYPE
 ) -> None:
-    """/get_availability <experience_id> <fecha YYYY-MM-DD> — disponibilidad real de una experiencia."""
+    """/get_availability <experience_id> <date_from DD-MM-YYYY> <date_to DD-MM-YYYY> — disponibilidad real de una experiencia."""
     if not update.message or not update.effective_chat:
         return
     chat_id = str(update.effective_chat.id)
     args: list[str] = context.args or []
 
-    if len(args) < 2:  # noqa: PLR2004
+    if len(args) < 3:  # noqa: PLR2004
         await update.message.reply_text(
-            "Uso: `/get_availability <experience_id> <fecha>`\n"
-            "Ejemplo: `/get_availability exp-001 2026-04-15`",
+            "Uso: `/get_availability <experience_id> <date_from> <date_to>`\n"
+            "Ejemplo: `/get_availability exp-001 01-03-2026 31-12-2026`",
             parse_mode="Markdown",
         )
         return
 
-    experience_id, date = args[0], args[1]
+    experience_id, date_from, date_to = args[0], args[1], args[2]
     ctx = _build_ctx(chat_id)
     try:
         availability = await get_availability(
-            ctx, experience_id=experience_id, date=date
+            ctx, experience_id=experience_id, date_from=date_from, date_to=date_to
         )
     except Exception as exc:
         await _send_error(
-            update, exc, f"cmd_get_availability exp={experience_id} date={date}"
+            update,
+            exc,
+            f"cmd_get_availability exp={experience_id} date_from={date_from} date_to={date_to}",
         )
         return
 

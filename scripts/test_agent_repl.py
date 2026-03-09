@@ -22,6 +22,7 @@ from chatbot.ai_agent.context import WebhookContextManager
 from chatbot.ai_agent.dependencies import AgentDeps
 from chatbot.ai_agent.models import GoogleModel
 from chatbot.core.config import config
+from chatbot.erp.client import build_erp_client
 
 load_dotenv()
 
@@ -53,13 +54,6 @@ class FakeWhatsAppClient:
 
 def _build_deps(erp_client: httpx.AsyncClient) -> AgentDeps:
     """Build AgentDeps with real ERP client and stubs for the rest."""
-    erp_client.headers.update(
-        {
-            "Authorization": f"token {config.ERP_API_TOKEN}",
-            "Content-Type": "application/json",
-        }
-    )
-
     return AgentDeps(
         erp_client=erp_client,
         db_services=None,  # type: ignore[arg-type]
@@ -75,10 +69,7 @@ async def repl() -> None:
     agent = get_cheese_agent()
     message_history: list[ModelMessage] = []
 
-    async with httpx.AsyncClient(
-        base_url=config.ERP_HOST,
-        timeout=15.0,
-    ) as erp_client:
+    async with build_erp_client() as erp_client:
         deps = _build_deps(erp_client)
 
         print(SEPARATOR)

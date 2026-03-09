@@ -20,7 +20,7 @@ from pydantic_ai import RunContext
 from chatbot.ai_agent.context import WebhookContextManager
 from chatbot.ai_agent.dependencies import AgentDeps
 from chatbot.ai_agent.models import ERP_BASE_PATH
-from chatbot.core.config import config
+from chatbot.erp.client import build_erp_client
 
 # ---------------------------------------------------------------------------
 # anyio: use a single session-scoped event loop so pydantic-ai's cached async
@@ -67,23 +67,14 @@ def build_run_context(deps: AgentDeps) -> RunContext[AgentDeps]:
 # ---------------------------------------------------------------------------
 
 
-@pytest.fixture(scope="session")
-def erp_headers() -> dict[str, str]:
-    """Authorization headers for the ERP API."""
-    return {
-        "Authorization": f"token {config.ERP_API_TOKEN}",
-        "Content-Type": "application/json",
-    }
-
-
 @pytest.fixture()
-async def erp_client(erp_headers: dict[str, str]) -> AsyncGenerator[httpx.AsyncClient]:
-    """Real httpx.AsyncClient pointing at the ERP."""
-    async with httpx.AsyncClient(
-        headers=erp_headers,
-        timeout=15.0,
-    ) as client:
+async def erp_client() -> AsyncGenerator[httpx.AsyncClient]:  # noqa: ARG001
+    """Real httpx.AsyncClient with dynamic token auth pointing at the ERP."""
+    client = build_erp_client()
+    try:
         yield client
+    finally:
+        await client.aclose()
 
 
 @pytest.fixture()

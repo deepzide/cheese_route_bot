@@ -218,9 +218,16 @@ async def test_get_availability(ctx: RunContext[AgentDeps]) -> None:
     assert len(experiences) > 0, "No hay experiencias en el ERP"
 
     exp_id = experiences[0].experience_id
-    result = await get_availability(ctx, experience_id=exp_id, date="2026-03-10")
+    result = await get_availability(
+        ctx,
+        experience_id=exp_id,
+        date_from="01-03-2026",
+        date_to="31-12-2026",
+    )
 
-    print(f"\n  get_availability({exp_id}, 2026-03-10) -> {len(result.slots)} slots")
+    print(
+        f"\n  get_availability({exp_id}, 01-03-2026 -> 31-12-2026) -> {len(result.slots)} slots"
+    )
     assert isinstance(result, AvailabilityResponse)
     assert result.experience_id == exp_id
 

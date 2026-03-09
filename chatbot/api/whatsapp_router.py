@@ -16,6 +16,7 @@ from chatbot.api.utils.text import strip_markdown
 from chatbot.api.utils.webhook_parser import extract_message_content
 from chatbot.core.config import config
 from chatbot.db.services import services
+from chatbot.erp.client import build_erp_client
 from chatbot.messaging.telegram_notifier import notify_error
 from chatbot.messaging.whatsapp import whatsapp_manager
 
@@ -25,14 +26,7 @@ router = APIRouter()
 ERROR_STATUS = {"status": "error"}
 OK_STATUS = {"status": "ok"}
 USER_ERROR_MSG = "Ocurrio un error al procesar tu mensaje. Por favor intentalo de nuevo o escribe /restart para reiniciar el chat."
-erp_client: httpx.AsyncClient = httpx.AsyncClient(
-    base_url=config.ERP_HOST,
-    headers={
-        "Authorization": f"token {config.ERP_API_TOKEN}",
-        "Content-Type": "application/json",
-    },
-    timeout=15.0,
-)
+erp_client: httpx.AsyncClient = build_erp_client()
 
 
 @router.get("")

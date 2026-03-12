@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from pydantic_ai import RunContext
+from pydantic_ai import ModelRetry, RunContext
 
 from chatbot.ai_agent.dependencies import AgentDeps
 from chatbot.ai_agent.models import (
@@ -12,7 +12,6 @@ from chatbot.ai_agent.models import (
     UpdateContactResult,
 )
 from chatbot.ai_agent.tools.erp_utils import extract_erp_data
-from chatbot.ai_agent.tools.utils import open_or_resume_conversation
 
 logger = logging.getLogger(__name__)
 
@@ -119,20 +118,40 @@ async def upsert_lead(
     )
     if not ctx.deps.contact_id:
         raise ValueError("contact_id is required in AgentDeps to upsert a lead")
-    if not ctx.deps.conversation_id:
-        await open_or_resume_conversation(ctx)
 
     response = await ctx.deps.erp_client.post(
         f"{ERP_BASE_PATH}.lead_controller.upsert_lead",
         json={
             "contact_id": ctx.deps.contact_id,
-            "conversation_id": ctx.deps.conversation_id,
             "interest_type": interest_type,
             "status": "OPEN",
         },
         timeout=ERP_TIMEOUT_SECONDS,
     )
-    response.raise_for_status()
+
+    # ERP bug: returns VALIDATION_ERROR when the lead is already CONVERTED.
+    # See context/api_issues.md for details.
+    if not response.is_success:
+        try:
+            body: dict[str, Any] = response.json()
+        except Exception:
+            body = {}
+        error_msg: str = (
+            body.get("message", {}).get("error", {}).get("message", "")
+            if isinstance(body.get("message"), dict)
+            else ""
+        )
+        if "CONVERTED" in error_msg:
+            logger.info(
+                "[upsert_lead] Lead already CONVERTED for contact_id=%s — skipping.",
+                ctx.deps.contact_id,
+            )
+            raise ModelRetry(
+                "El lead de este contacto ya fue convertido. "
+                "No es necesario crear un nuevo lead. Continua con la conversacion normalmente."
+            )
+        response.raise_for_status()
+
     data: dict[str, Any] = extract_erp_data(response.json())
 
     lead = LeadInfo.model_validate(data)

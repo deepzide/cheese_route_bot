@@ -38,7 +38,6 @@ async def list_experiences(
     page: int = 1,
     page_size: int = 20,
     package_mode: str | None = None,
-    search: str | None = None,
     date: str | None = None,
     establishment_id: str | None = None,
 ) -> list[Experience]:
@@ -52,16 +51,15 @@ async def list_experiences(
         page: Page number for pagination.
         page_size: Maximum experiences to fetch (default 20).
         package_mode: Filter by "Both", "Public", or "Package".
-        search: Keyword for searching in title and description.
         date: Availability date (YYYY-MM-DD).
         establishment_id: Filter experiences belonging to a specific establishment.
     """
+    ctx.deps.called_tools.add("list_experiences")
     logger.info(
-        "[list_experiences] page=%s page_size=%s package_mode=%s search=%s date=%s establishment_id=%s",
+        "[list_experiences] page=%s page_size=%s package_mode=%s date=%s establishment_id=%s",
         page,
         page_size,
         package_mode,
-        search,
         date,
         establishment_id,
     )
@@ -74,8 +72,6 @@ async def list_experiences(
 
     if package_mode:
         payload["package_mode"] = package_mode
-    if search:
-        payload["search"] = search
     if date:
         payload["date"] = date
     if establishment_id:
@@ -125,7 +121,6 @@ async def list_routes(
     ctx: RunContext[AgentDeps],
     page: int = 1,
     page_size: int = 20,
-    search: str | None = None,
 ) -> list[Route]:
     """List available themed routes with their composition.
 
@@ -133,16 +128,14 @@ async def list_routes(
         ctx: Agent run context with dependencies.
         page: Page number for pagination.
         page_size: Maximum routes to fetch (default 20).
-        search: Keyword for searching in route names and descriptions.
     """
-    logger.info("[list_routes] page=%s page_size=%s search=%s", page, page_size, search)
+    ctx.deps.called_tools.add("list_routes")
+    logger.info("[list_routes] page=%s page_size=%s", page, page_size)
     payload: dict[str, Any] = {
         "page": page,
         "page_size": page_size,
         "status": "ONLINE",
     }
-    if search:
-        payload["search"] = search
 
     response = await ctx.deps.erp_client.post(
         f"{ERP_BASE_PATH}.route_controller.list_routes",
@@ -260,6 +253,42 @@ async def get_availability(
     )
     response.raise_for_status()
     return AvailabilityResponse.model_validate(extract_erp_data(response.json()))
+
+
+async def list_experiences_by_availability(
+    ctx: RunContext[AgentDeps],
+    date_from: str,
+    date_to: str,
+) -> list[AvailabilityResponse]:
+    """List all experiences that have available slots in a date range.
+
+    Calls the same availability endpoint as ``get_availability`` but without
+    specifying an experience, so the ERP returns every experience that has
+    availability between ``date_from`` and ``date_to``.
+
+    Use this tool when the user asks which experiences are available on/around
+    a date without mentioning a specific one.
+
+    Args:
+        ctx: Agent run context with dependencies.
+        date_from: Start date in DD-MM-YYYY format (e.g. "01-03-2026").
+        date_to: End date in DD-MM-YYYY format (e.g. "31-03-2026").
+    """
+    logger.info(
+        "[list_experiences_by_availability] date_from=%s date_to=%s",
+        date_from,
+        date_to,
+    )
+    response = await ctx.deps.erp_client.post(
+        f"{ERP_BASE_PATH}.availability_controller.get_availability",
+        json={"date_from": date_from, "date_to": date_to},
+        timeout=ERP_TIMEOUT_SECONDS,
+    )
+    response.raise_for_status()
+    data: list[dict[str, Any]] = extract_erp_data(response.json())
+    if isinstance(data, dict):
+        data = [data]
+    return [AvailabilityResponse.model_validate(item) for item in data]
 
 
 async def get_route_availability(

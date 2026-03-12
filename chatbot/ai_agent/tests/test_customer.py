@@ -241,6 +241,8 @@ async def test_open_or_resume_conversation_idempotent(
     except httpx.HTTPStatusError as exc:
         pytest.skip(f"ERP devolvio error {exc.response.status_code}")
 
+    assert isinstance(first, ConversationInfo)
+    assert isinstance(second, ConversationInfo)
     print(f"\n  1ra: {first.conversation_id} | 2da: {second.conversation_id}")
     # El ERP puede crear una nueva o reusar la activa – ambas son validas
     assert first.conversation_id

@@ -24,9 +24,9 @@ async def resolve_or_create_contact(
     Args:
         ctx: Agent run context with dependencies.
     """
-    resolved_phone: str = ctx.deps.user_phone or ctx.deps.telegram_id or ""
+    resolved_phone: str = ctx.deps.user_phone or ""
     if not resolved_phone:
-        raise ValueError("No phone or telegram_id available to resolve contact")
+        raise ValueError("No phone available to resolve contact")
 
     payload: dict[str, Any] = {"phone": resolved_phone}
 
@@ -41,11 +41,11 @@ async def resolve_or_create_contact(
     contact = ContactInfo.model_validate(data)
     ctx.deps.contact_id = contact.contact_id
 
-    is_real_name: bool = bool(
+    """ is_real_name: bool = bool(
         contact.name and contact.name != contact.phone and contact.name != contact.email
-    )
+    ) """
 
-    if is_real_name:
+    if contact.name:
         ctx.deps.user_name = contact.name
     if contact.email:
         ctx.deps.user_email = contact.email

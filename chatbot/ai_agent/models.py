@@ -29,6 +29,7 @@ ERP_BASE_PATH: str = "https://erp-cheese.deepzide.com/api/method/cheese.api.v1"
 # Enums
 # ---------------------------------------------------------------------------
 
+
 class GoogleModel(StrEnum):
     Gemini_Flash_Latest = "google-gla:gemini-flash-lite-latest"
     Gemini_Flash_Lite_Latest = "google-gla:gemini-flash-lite-latest"
@@ -36,7 +37,9 @@ class GoogleModel(StrEnum):
     Gemini_3_Pro_Preview = "google-gla:gemini-3-pro-preview"
     Gemini_3_Flash_Preview = "google-gla:gemini-3-flash-preview"
     Gemini_3_1_Pro_Preview = "google-gla:gemini-3.1-pro-preview"
-    Gemini_3_1_Pro_Preview_Custom_Tools = "google-gla:gemini-3.1-pro-preview-customtools"
+    Gemini_3_1_Pro_Preview_Custom_Tools = (
+        "google-gla:gemini-3.1-pro-preview-customtools"
+    )
     Gemini_3_1_Flash_Lite_Preview = "google-gla:gemini-3.1-flash-lite-preview"
 
 
@@ -638,6 +641,99 @@ class ReservationResponse(BaseModel):
             if "reservation_id" not in data:
                 data["reservation_id"] = data.get("id", data.get("name", ""))
         return data
+
+
+class PendingTicket(BaseModel):
+    """Ticket created in PENDING state by lead_controller.upsert_lead."""
+
+    ticket_id: str
+    status: str = "PENDING"
+    contact_id: str | None = None
+    experience_id: str | None = None
+    slot_id: str | None = None
+    party_size: int | None = None
+    total_price: float | None = None
+    deposit_required: bool | None = None
+    deposit_amount: float | None = None
+    expires_at: str | None = None
+
+
+class ReservationContactDetail(BaseModel):
+    """Contact embedded in get_reservation_status response."""
+
+    contact_id: str | None = None
+    full_name: str | None = None
+    phone: str | None = None
+    email: str | None = None
+
+
+class ReservationExperienceDetail(BaseModel):
+    """Experience embedded in get_reservation_status response."""
+
+    experience_id: str | None = None
+    name: str | None = None
+    description: str | None = None
+
+
+class ReservationSlotDetail(BaseModel):
+    """Slot embedded in get_reservation_status response."""
+
+    slot_id: str | None = None
+    date: str | None = None
+    time: str | None = None
+    max_capacity: int | None = None
+
+
+class ReservationStatusDetail(BaseModel):
+    """Full details returned by ticket_controller.get_reservation_status."""
+
+    ticket_id: str
+    status: str | None = None
+    contact: ReservationContactDetail | None = None
+    experience: ReservationExperienceDetail | None = None
+    slot: ReservationSlotDetail | None = None
+    party_size: int | None = None
+    deposit_required: bool | int | None = None
+    deposit_amount: float | None = None
+    expires_at: str | None = None
+    conversation_id: str | None = None
+
+
+class TicketSummary(BaseModel):
+    """Single ticket returned in get_reservations_by_phone list."""
+
+    name: str
+    company: str | None = None
+    experience: str | None = None
+    slot: str | None = None
+    route: str | None = None
+    party_size: int | None = None
+    status: str | None = None
+    creation: str | None = None
+    modified: str | None = None
+    experience_name: str | None = None
+    slot_date: str | None = None
+    slot_time: str | None = None
+
+
+class ReservationsListResponse(BaseModel):
+    """Response from ticket_controller.get_reservations_by_phone."""
+
+    contact: ReservationContactDetail | None = None
+    tickets: list[TicketSummary] = Field(default_factory=list)
+    page: int | None = None
+    page_size: int | None = None
+    total: int | None = None
+
+
+class ModificationResult(BaseModel):
+    """Result of ticket_controller.confirm_modification."""
+
+    ticket_id: str
+    status: str | None = None
+    slot_id: str | None = None
+    party_size: int | None = None
+    changes: list[str] = Field(default_factory=list)
 
 
 class ModificationPreview(BaseModel):

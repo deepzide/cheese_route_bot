@@ -6,7 +6,7 @@ WhatsApp client, and per-conversation webhook context.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import httpx
 
@@ -29,3 +29,5 @@ class AgentDeps:
     telegram_id: str | None = None
     contact_id: str | None = None
     conversation_id: str | None = None
+    # Tracks which tools have been called in the current turn (for once-per-turn enforcement)
+    called_tools: set[str] = field(default_factory=set)

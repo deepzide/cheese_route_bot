@@ -16,12 +16,17 @@ logger = logging.getLogger(__name__)
 
 ERP_TIMEOUT_SECONDS = 15.0
 
+_ALREADY_EXISTS_MSG = "An active conversation already exists"
+
 
 async def open_or_resume_conversation(
     ctx: RunContext[AgentDeps],
     channel: str = "WhatsApp",
-) -> ConversationInfo:
+) -> ConversationInfo | None:
     """Open a new conversation or resume the active one for the current contact.
+
+    Returns ``None`` when the ERP reports that an active conversation already
+    exists but does not return its ID (known ERP bug — see api_issues.md).
 
     Args:
         ctx: Agent run context with dependencies.
@@ -44,9 +49,29 @@ async def open_or_resume_conversation(
         },
         timeout=ERP_TIMEOUT_SECONDS,
     )
-    response.raise_for_status()
-    data: dict[str, Any] = extract_erp_data(response.json())
 
+    # ERP bug: returns VALIDATION_ERROR instead of the existing conversation.
+    # See context/api_issues.md for details.
+    if not response.is_success:
+        try:
+            body: dict[str, Any] = response.json()
+        except Exception:
+            body = {}
+        error_msg: str = (
+            body.get("message", {}).get("error", {}).get("message", "")
+            if isinstance(body.get("message"), dict)
+            else ""
+        )
+        if _ALREADY_EXISTS_MSG in error_msg:
+            logger.warning(
+                "[open_or_resume_conversation] ERP bug: conversation already exists "
+                "for contact_id=%s but ERP did not return conversation_id.",
+                ctx.deps.contact_id,
+            )
+            return None
+        response.raise_for_status()
+
+    data: dict[str, Any] = extract_erp_data(response.json())
     conversation = ConversationInfo.model_validate(data)
     ctx.deps.conversation_id = conversation.conversation_id
     logger.debug(

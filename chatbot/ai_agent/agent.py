@@ -4,13 +4,20 @@ import json
 import logging
 from datetime import datetime, timezone
 
-from pydantic_ai import Agent, RunContext
+from pydantic_ai import Agent, RunContext, Tool
 from pydantic_ai.settings import ModelSettings
+from pydantic_ai.tools import ToolDefinition
 
 from chatbot.ai_agent.dependencies import AgentDeps
 from chatbot.ai_agent.instructions import resolve_or_create_contact
 from chatbot.ai_agent.models import GoogleModel
 from chatbot.ai_agent.prompts import SYSTEM_PROMPT
+from chatbot.ai_agent.tools.booking import (
+    confirm_modification,
+    create_pending_reservation,
+    get_reservation_status,
+    get_reservations_by_phone,
+)
 from chatbot.ai_agent.tools.catalog import (
     get_availability,
     get_establishment_details,
@@ -19,6 +26,7 @@ from chatbot.ai_agent.tools.catalog import (
     get_route_detail,
     list_establishments,
     list_experiences,
+    list_experiences_by_availability,
     list_routes,
 )
 from chatbot.ai_agent.tools.customer import (
@@ -31,20 +39,42 @@ logger = logging.getLogger(__name__)
 ERP_TIMEOUT_SECONDS = 15.0
 
 
+def _once_per_turn(tool_name: str):
+    """Return a `prepare` callback that disables the tool after its first call."""
+
+    async def prepare(
+        ctx: RunContext[AgentDeps], tool_def: ToolDefinition
+    ) -> ToolDefinition | None:
+        if tool_name in ctx.deps.called_tools:
+            logger.debug(
+                "[once_per_turn] %s already called this turn — disabled", tool_name
+            )
+            return None
+        return tool_def
+
+    return prepare
+
+
 AGENT_TOOLS = [
-    # Catalog & discovery
-    list_experiences,
+    # Catalog & discovery (list_experiences and list_routes limited to one call per turn)
+    Tool(list_experiences, prepare=_once_per_turn("list_experiences")),
     get_experience_detail,
-    list_routes,
+    Tool(list_routes, prepare=_once_per_turn("list_routes")),
     get_route_detail,
     list_establishments,
     get_establishment_details,
     # Availability
     get_availability,
+    list_experiences_by_availability,
     get_route_availability,
     # Customer / CRM (contact resolution runs as system_prompt instruction)
     update_contact,
     upsert_lead,
+    # Reservations
+    create_pending_reservation,
+    get_reservation_status,
+    get_reservations_by_phone,
+    confirm_modification,
     # Date resolution sub-agent
     resolve_relative_date,
 ]

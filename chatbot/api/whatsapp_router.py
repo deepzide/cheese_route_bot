@@ -117,7 +117,7 @@ async def _process_message(message: Message) -> None:
         logger.exception("Error processing message for %s: %s", user_number, exc)
         await notify_error(
             exc,
-            context=f"_process_message | user={user_number} | msg={incoming_msg[:80]}",
+            context=f"_process_message | user={user_number} | msg={incoming_msg[:200]}",
         )
         await whatsapp_manager.send_text(
             user_number=user_number, text=USER_ERROR_MSG, message_id=message_id

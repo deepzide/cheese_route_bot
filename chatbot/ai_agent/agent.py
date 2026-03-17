@@ -34,6 +34,7 @@ from chatbot.ai_agent.tools.customer import (
     upsert_lead,
 )
 from chatbot.ai_agent.tools.date_resolver import resolve_relative_date
+from chatbot.ai_agent.tools.support import create_complaint
 
 logger = logging.getLogger(__name__)
 ERP_TIMEOUT_SECONDS = 15.0
@@ -77,6 +78,8 @@ AGENT_TOOLS = [
     confirm_modification,
     # Date resolution sub-agent
     resolve_relative_date,
+    # Support & complaints
+    create_complaint,
 ]
 
 

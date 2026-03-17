@@ -58,6 +58,19 @@ class LeadStatus(StrEnum):
     CONVERTED = "converted"
 
 
+class ComplaintType(StrEnum):
+    SERVICE = "Service"
+    PRODUCT = "Product"
+    INFRASTRUCTURE = "Infrastructure"
+    STAFF = "Staff"
+    OTHER = "Other"
+
+
+class ComplaintIncidentType(StrEnum):
+    LOCAL = "LOCAL"
+    GENERAL = "GENERAL"
+
+
 # ---------------------------------------------------------------------------
 # 1. Contact
 # ---------------------------------------------------------------------------
@@ -743,6 +756,28 @@ class ModificationPreview(BaseModel):
     changes: list[dict[str, Any]] = Field(default_factory=list)
     price_delta: float | None = None
     message: str | None = None
+
+
+# ---------------------------------------------------------------------------
+# 14. Survey and Complaints
+# ---------------------------------------------------------------------------
+
+
+class ComplaintResult(BaseModel):
+    """Response from complaint_controller.create_complaint.
+
+    ERP response fields: complaint_id, support_case_id, contact_id,
+    ticket_id, route_booking_id, incident_type, status, created_at.
+    """
+
+    complaint_id: str
+    support_case_id: str
+    contact_id: str
+    ticket_id: str | None = None
+    route_booking_id: str | None = None
+    incident_type: ComplaintIncidentType
+    status: str
+    created_at: str | None = None
 
 
 # ---------------------------------------------------------------------------

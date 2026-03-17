@@ -92,7 +92,7 @@ def get_cheese_agent() -> Agent[AgentDeps, str]:
     global _cheese_agent  # noqa: PLW0603
     if _cheese_agent is None:
         _cheese_agent = Agent(
-            model=GoogleModel.Gemini_3_Flash_Preview,
+            model=GoogleModel.Gemini_Flash_Latest,
             system_prompt=SYSTEM_PROMPT,
             deps_type=AgentDeps,
             tools=AGENT_TOOLS,

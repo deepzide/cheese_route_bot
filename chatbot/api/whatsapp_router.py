@@ -24,6 +24,7 @@ from chatbot.api.utils.webhook_parser import extract_message_content
 from chatbot.core.config import config
 from chatbot.db.services import services
 from chatbot.erp.client import build_erp_client
+from chatbot.erp.transcript import upload_message_transcript
 from chatbot.messaging.telegram_notifier import notify_error, notify_slow_response
 from chatbot.messaging.whatsapp import whatsapp_manager
 
@@ -210,6 +211,14 @@ async def _process_message(message: Message) -> None:
             user_number=user_number, text=ai_response, message_id=message_id
         )
         asyncio.create_task(_maybe_compress_history(user_number, len(history)))
+        asyncio.create_task(
+            upload_message_transcript(
+                client=erp_client,
+                phone_number=user_number,
+                user_message=incoming_msg,
+                bot_response=ai_response,
+            )
+        )
 
     except Exception as exc:
         logger.exception("Error processing message for %s: %s", user_number, exc)

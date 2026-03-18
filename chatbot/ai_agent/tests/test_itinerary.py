@@ -67,13 +67,13 @@ async def test_get_customer_itinerary(monkeypatch):
             )
 
     deps = AgentDeps(
-        erp_client=DummyERPClient(),
-        db_services=None,
-        whatsapp_client=None,
-        webhook_context=None,
+        erp_client=DummyERPClient(),  # type: ignore
+        db_services=None,  # type: ignore
+        whatsapp_client=None,  # type: ignore
+        webhook_context=None,  # type: ignore
         contact_id="+5351054482",
     )
     ctx = type("Ctx", (), {"deps": deps})()
-    result = await get_customer_itinerary(ctx)
+    result = await get_customer_itinerary(ctx)  # type: ignore
     assert isinstance(result, CustomerItinerary)
     print("Itinerario obtenido:", result.model_dump_json(indent=2))

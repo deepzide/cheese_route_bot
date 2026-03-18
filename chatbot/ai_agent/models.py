@@ -749,6 +749,15 @@ class ModificationResult(BaseModel):
     changes: list[str] = Field(default_factory=list)
 
 
+class CancellationResult(BaseModel):
+    """Result of ticket_controller.cancel_reservation."""
+
+    ticket_id: str
+    old_status: str | None = None
+    new_status: str | None = None
+    slot_id: str | None = None
+
+
 class ModificationPreview(BaseModel):
     """Preview of the impact of a reservation modification."""
 
@@ -926,3 +935,54 @@ class PaymentReceipt(BaseModel):
         None,
         description="Concepto o motivo del pago.",
     )
+
+
+# ---------------------------------------------------------------------------
+# ERP → Bot webhook event models (incoming from ERP triggers)
+# ---------------------------------------------------------------------------
+
+
+class TicketDecision(StrEnum):
+    """Possible outcomes for a pending reservation ticket."""
+
+    APPROVED = "approved"
+    REJECTED = "rejected"
+    EXPIRED = "expired"
+
+
+class ERPSendMessageRequest(BaseModel):
+    """Body for /erp/send-whatsapp endpoint.
+
+    The ERP sends this when it wants to push a free-text message to a contact
+    via WhatsApp. The phone is resolved from the ERP using contact_id.
+    The 24-hour META free-messaging window is verified before sending.
+    """
+
+    contact_id: str
+    message: str
+
+
+class ERPTicketStatusRequest(BaseModel):
+    """Body for /erp/ticket-status endpoint.
+
+    The ERP sends this when a pending reservation is approved, rejected, or
+    has expired, so the bot can notify the customer via WhatsApp.
+    """
+
+    contact_id: str
+    ticket_id: str
+    new_status: TicketDecision
+    observations: str | None = None
+
+
+class ERPSurveyRequest(BaseModel):
+    """Body for /erp/activity-completed endpoint.
+
+    The ERP sends this after an activity is completed so the bot can send
+    a satisfaction survey to the customer via WhatsApp.
+    """
+
+    contact_id: str
+    experience_id: str
+    slot_id: str
+    ticket_id: str

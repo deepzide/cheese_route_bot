@@ -140,7 +140,9 @@ class Services:
 
     async def get_recent_messages(self, phone: str, hours: int = 24) -> list:
         """Return all messages for *phone* created within the last *hours* hours."""
-        since: datetime = datetime.now(UTC).replace(tzinfo=None) - timedelta(hours=hours)
+        since: datetime = datetime.now(UTC).replace(tzinfo=None) - timedelta(
+            hours=hours
+        )
         query = (
             message_table.select()
             .where(message_table.c.user_phone == phone)
@@ -182,7 +184,7 @@ class Services:
             raw: str = row.message  # type: ignore[attr-defined]
             content = raw.removeprefix("Usuario - ").removeprefix("Bot - ")
             if role == "user":
-                history.append(ModelRequest(parts=[UserPromptPart(content=content)]))
+                history.append(ModelRequest(parts=[UserPromptPart(content=content)]))  # type: ignore
             elif role == "assistant":
                 history.append(
                     ModelResponse(

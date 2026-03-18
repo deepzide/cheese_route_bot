@@ -843,6 +843,50 @@ class RouteBookingStatus(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# 11. Payments
+# ---------------------------------------------------------------------------
+
+
+class PaymentInstructions(BaseModel):
+    """Payment link and instructions for a ticket deposit.
+
+    ERP endpoint: deposit_controller.get_payment_link_or_instructions
+    ERP response fields: deposit_id, ticket_id, amount_required, amount_paid,
+    amount_remaining, due_at, status, payment_link, instructions.
+    """
+
+    deposit_id: str
+    ticket_id: str
+    amount_required: float | None = None
+    amount_paid: float | None = None
+    amount_remaining: float | None = None
+    due_at: str | None = None
+    status: str | None = None
+    payment_link: str | None = None
+    instructions: str | None = None
+
+
+class DepositPaymentResult(BaseModel):
+    """Result of recording a deposit payment via deposit_controller.record_deposit_payment.
+
+    ERP response data fields: deposit_id, ticket_id, amount_paid,
+    total_amount_paid, amount_required, amount_remaining, old_status,
+    new_status, verification_method, is_complete.
+    """
+
+    deposit_id: str
+    ticket_id: str
+    amount_paid: float
+    total_amount_paid: float
+    amount_required: float
+    amount_remaining: float
+    old_status: str
+    new_status: str
+    verification_method: str
+    is_complete: bool
+
+
+# ---------------------------------------------------------------------------
 # 14. Survey and Complaints
 # ---------------------------------------------------------------------------
 

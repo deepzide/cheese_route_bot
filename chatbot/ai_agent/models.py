@@ -759,6 +759,81 @@ class ModificationPreview(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# 9b. Route Reservations
+# ---------------------------------------------------------------------------
+
+
+class PendingRouteBooking(BaseModel):
+    """Route booking created in PENDING state by route_booking_controller.create_route_reservation.
+
+    ERP response fields: route_booking_id, route_id, contact_id, party_size,
+    status, total_price, deposit_required, deposit_amount, tickets (list of
+    ticket_id strings), tickets_count, conversation_id.
+    """
+
+    route_booking_id: str
+    route_id: str | None = None
+    contact_id: str | None = None
+    party_size: int | None = None
+    status: str = "PENDING"
+    total_price: float | None = None
+    deposit_required: bool = False
+    deposit_amount: float | None = None
+    tickets: list[str] = Field(default_factory=list)
+    tickets_count: int | None = None
+    conversation_id: str | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def _normalize(cls, data: Any) -> Any:
+        if isinstance(data, dict) and "deposit_required" in data:
+            data["deposit_required"] = bool(data["deposit_required"])
+        return data
+
+
+class RouteTicketStatus(BaseModel):
+    """Ticket detail embedded in get_route_status response.
+
+    ERP response fields: ticket_id, status, experience, slot, party_size,
+    slot_date.
+    """
+
+    ticket_id: str
+    status: str | None = None
+    experience: str | None = None
+    slot: str | None = None
+    party_size: int | None = None
+    slot_date: str | None = None
+
+
+class RouteBookingStatus(BaseModel):
+    """Full route booking status returned by route_booking_controller.get_route_status.
+
+    ERP response fields: route_booking_id, route_id, status, tickets,
+    tickets_count, confirmed_count, pending_count, total_price,
+    deposit_required, deposit_amount.
+    """
+
+    route_booking_id: str
+    route_id: str | None = None
+    status: str | None = None
+    tickets: list[RouteTicketStatus] = Field(default_factory=list)
+    tickets_count: int | None = None
+    confirmed_count: int | None = None
+    pending_count: int | None = None
+    total_price: float | None = None
+    deposit_required: bool | int | None = None
+    deposit_amount: float | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def _normalize(cls, data: Any) -> Any:
+        if isinstance(data, dict) and "deposit_required" in data:
+            data["deposit_required"] = bool(data["deposit_required"])
+        return data
+
+
+# ---------------------------------------------------------------------------
 # 14. Survey and Complaints
 # ---------------------------------------------------------------------------
 
@@ -794,3 +869,60 @@ class WebhookEvent(BaseModel):
     contact_phone: str
     timestamp: datetime = Field(default_factory=datetime.now)
     payload: dict[str, Any] = Field(default_factory=dict)
+
+
+# ---------------------------------------------------------------------------
+# OCR – Payment receipt
+# ---------------------------------------------------------------------------
+
+
+class PaymentReceipt(BaseModel):
+    """Structured data extracted from a payment receipt image (JPG/PNG).
+
+    All fields are optional because some receipts may not contain all data.
+    """
+
+    amount: str | None = Field(
+        None,
+        description=(
+            "Monto total depositado o pagado. "
+            "Busca etiquetas como 'Monto depositado', 'Total', 'Monto', 'Amount'."
+        ),
+    )
+    transaction_datetime: str | None = Field(
+        None,
+        description=(
+            "Fecha y hora de la transacción en formato DD/MM/YYYY HH:MM:SS. "
+            "Si sólo hay fecha, usa 00:00:00 como hora."
+        ),
+    )
+    reference: str | None = Field(
+        None,
+        description=(
+            "Número de referencia, código de barras o código de transacción "
+            "que identifica de forma única la operación."
+        ),
+    )
+    destination_account: str | None = Field(
+        None,
+        description="Número de cuenta, IBAN o información del destinatario.",
+    )
+    recipient_name: str | None = Field(
+        None,
+        description="Nombre de la empresa o persona que recibe el pago.",
+    )
+    payment_method: str | None = Field(
+        None,
+        description="Método de pago: Efectivo, Transferencia, Tarjeta, etc.",
+    )
+    branch: str | None = Field(
+        None,
+        description=(
+            "Subagencia, sucursal o ubicación donde se realizó el pago. "
+            "Busca etiquetas como 'Subagencia', 'Sucursal', 'Agencia', 'Branch'."
+        ),
+    )
+    concept: str | None = Field(
+        None,
+        description="Concepto o motivo del pago.",
+    )

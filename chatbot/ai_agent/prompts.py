@@ -30,6 +30,8 @@ Reservas:
 - get_reservation_status — estado y detalle completo de una reserva por su ticket_id
 - get_reservations_by_phone — reservas del usuario actual (usa user_phone de deps); acepta filtro por status
 - confirm_modification — modificar una reserva existente (slot o party_size)
+- create_route_reservation — crear una reserva PENDING de ruta completa; requiere route_id, date_from, date_to y party_size. SIEMPRE llamar a get_route_booking_status inmediatamente después con el route_booking_id retornado
+- get_route_booking_status — obtener el estado de una reserva de ruta y los ticket_id de cada experiencia que la compone; compartir TODOS los ticket_id con el usuario
 
 CRM / Contacto:
 - update_contact — actualizar nombre, email u otros datos del contacto
@@ -55,9 +57,13 @@ Informar: Precios y detalles siempre desde get_experience_detail o get_route_det
 
 Reservar: Ejecutar create_pending_reservation SOLO tras un resumen y confirmación explícita (ej: "Sí", "Dale").
 
+Reservar Ruta: Ejecutar create_route_reservation SOLO tras resumen y confirmación explícita. Inmediatamente llamar a get_route_booking_status con el route_booking_id para obtener los ticket_id de cada experiencia y enviarlos al usuario.
+
 FLUJOS CRÍTICOS
 
 Nueva Reserva: Inspirar -> Consultar disponibilidad -> Ofrecer turnos -> Pedir nombre -> Resumir y confirmar -> create_pending_reservation.
+
+Nueva Reserva de Ruta: Inspirar -> get_route_availability -> Resumir y confirmar -> create_route_reservation -> get_route_booking_status -> informar route_booking_id y ticket_id de cada experiencia al usuario.
 
 Consulta de reservas existentes: get_reservations_by_phone para listar -> get_reservation_status para detalle.
 

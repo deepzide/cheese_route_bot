@@ -15,8 +15,10 @@ from chatbot.ai_agent.prompts import SYSTEM_PROMPT
 from chatbot.ai_agent.tools.booking import (
     confirm_modification,
     create_pending_reservation,
+    create_route_reservation,
     get_reservation_status,
     get_reservations_by_phone,
+    get_route_booking_status,
 )
 from chatbot.ai_agent.tools.catalog import (
     get_availability,
@@ -76,6 +78,9 @@ AGENT_TOOLS = [
     get_reservation_status,
     get_reservations_by_phone,
     confirm_modification,
+    # Route reservations
+    create_route_reservation,
+    get_route_booking_status,
     # Date resolution sub-agent
     resolve_relative_date,
     # Support & complaints

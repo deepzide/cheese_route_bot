@@ -244,7 +244,14 @@ async def whatsapp_reply(request: Request, background_tasks: BackgroundTasks):
     if not message_data:
         return OK_STATUS
 
-    user_number, incoming_msg, message_id = message_data
+    user_number, incoming_msg, message_id, direct_response = message_data
+
+    if direct_response:
+        await whatsapp_manager.mark_read(message_id)
+        await whatsapp_manager.send_text(
+            user_number=user_number, text=incoming_msg, message_id=message_id
+        )
+        return OK_STATUS
 
     msg = Message(user_number=user_number, content=incoming_msg, message_id=message_id)
     await message_queue.enqueue(msg)

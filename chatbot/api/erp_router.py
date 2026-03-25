@@ -10,6 +10,7 @@ from chatbot.ai_agent.models import (
     ERP_BASE_PATH,
     ContactInfo,
     ERPSendMessageRequest,
+    ERPSendTelegramRequest,
     ERPSurveyRequest,
     ERPTicketStatusRequest,
     TicketDecision,
@@ -19,6 +20,7 @@ from chatbot.api.utils.security import get_api_key
 from chatbot.api.whatsapp_router import erp_client
 from chatbot.db.services import services
 from chatbot.messaging.telegram_notifier import notify_error
+from chatbot.messaging.telegram_notifier import send_message as send_telegram
 from chatbot.messaging.whatsapp import whatsapp_manager
 
 logger = logging.getLogger(__name__)
@@ -203,6 +205,30 @@ async def send_whatsapp_message(body: ERPSendMessageRequest) -> dict[str, str]:
 
     logger.info("[send-whatsapp] Mensaje enviado a %s", phone)
     return {"status": "ok", "phone": phone}
+
+
+@router.post("/send-telegram", summary="Enviar mensaje de Telegram a un usuario")
+async def send_telegram_message(body: ERPSendTelegramRequest) -> dict[str, str]:
+    """Recibe un contact_id (Telegram chat ID) y un mensaje, y lo envía por Telegram.
+
+    Body:
+        - contact_id: Telegram chat ID del destinatario.
+        - message: Texto a enviar por Telegram.
+    """
+    logger.info("[send-telegram] contact_id=%s", body.contact_id)
+
+    ok = await send_telegram(chat_id=body.contact_id, text=body.message)
+    if not ok:
+        logger.error(
+            "[send-telegram] Error enviando Telegram a contact_id=%s", body.contact_id
+        )
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"Error al enviar el mensaje de Telegram al chat {body.contact_id}",
+        )
+
+    logger.info("[send-telegram] Mensaje enviado a contact_id=%s", body.contact_id)
+    return {"status": "ok", "chat_id": body.contact_id}
 
 
 @router.post("/ticket-status", summary="Notificar al cliente el estado de su reserva")

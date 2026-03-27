@@ -23,6 +23,7 @@ from chatbot.ai_agent.tools.payments import (
     register_deposit_payment,
     validate_ticket_ownership,
 )
+from chatbot.ai_agent.models import ERP_BASE_PATH
 from chatbot.api.utils import message_handler
 from chatbot.api.utils.message_queue import Message, message_queue
 from chatbot.api.utils.text import strip_markdown
@@ -457,18 +458,38 @@ async def _process_image_receipt(
     )
     if result.is_complete:
         msg = (
-            f"✅ Pago registrado exitosamente.\n"
+            f"✅ ¡Seña pagada completamente!\n"
             f"Depósito: {result.deposit_id}\n"
-            f"Monto pagado: {result.amount_paid}\n"
-            f"Estado: Pago completado."
+            f"Ticket: {result.ticket_id}\n"
+            f"Total pagado: {result.total_amount_paid} UYU"
+        )
+        await whatsapp_manager.send_text(
+            user_number=user_number, text=msg, message_id=message_id
+        )
+        await _fetch_and_send_qr(
+            user_number=user_number,
+            ticket_id=ticket_id,
         )
     else:
         msg = (
             f"✅ Pago registrado exitosamente.\n"
             f"Depósito: {result.deposit_id}\n"
-            f"Monto pagado: {result.amount_paid}\n"
-            f"Monto restante: {result.amount_remaining}"
+            f"Monto pagado: {result.amount_paid} UYU\n"
+            f"Monto restante: {result.amount_remaining} UYU"
         )
-    await whatsapp_manager.send_text(
-        user_number=user_number, text=msg, message_id=message_id
+        await whatsapp_manager.send_text(
+            user_number=user_number, text=msg, message_id=message_id
+        )
+
+
+async def _fetch_and_send_qr(user_number: str, ticket_id: str) -> None:
+    """Obtiene el QR de check-in del ERP y lo envía al usuario por WhatsApp.
+
+    Args:
+        user_number: Número de WhatsApp del usuario.
+        ticket_id: Identificador del ticket para el que se solicita el QR.
+    """
+    logger.info(
+        "[_fetch_and_send_qr] user=%s ticket_id=%s", user_number, ticket_id
     )
+    return

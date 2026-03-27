@@ -21,6 +21,7 @@ from chatbot.ai_agent.tools.payments import (
     erp_validation_user_message,
     parse_amount,
     register_deposit_payment,
+    validate_ticket_ownership,
 )
 from chatbot.api.utils import message_handler
 from chatbot.api.utils.message_queue import Message, message_queue
@@ -356,6 +357,26 @@ async def _process_image_receipt(
                 "Para registrar tu pago necesito el número de ticket (ej: TKT-2026-03-00018). "
                 "Por favor envía la imagen con el número de ticket como descripción."
             ),
+            message_id=message_id,
+        )
+        return
+
+    try:
+        await validate_ticket_ownership(
+            erp_client=erp_client,
+            user_phone=user_number,
+            ticket_id=ticket_id,
+        )
+    except ValueError as exc:
+        logger.warning(
+            "[receipt] Ticket validation failed for user=%s ticket=%s: %s",
+            user_number,
+            ticket_id,
+            exc,
+        )
+        await whatsapp_manager.send_text(
+            user_number=user_number,
+            text=f"⚠️ {exc}",
             message_id=message_id,
         )
         return

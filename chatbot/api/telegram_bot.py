@@ -37,6 +37,7 @@ from chatbot.ai_agent.tools.payments import (
     erp_validation_user_message,
     parse_amount,
     register_deposit_payment,
+    validate_ticket_ownership,
 )
 from chatbot.api.utils import message_handler, telegram_commands
 from chatbot.api.utils.telegram_commands import (
@@ -268,6 +269,23 @@ async def _handle_image(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
             return
 
         assert erp_client is not None, "ERP client not initialized"
+        user_phone: str = _user_phones.get(chat_id, "")
+        try:
+            await validate_ticket_ownership(
+                erp_client=erp_client,
+                user_phone=user_phone,
+                ticket_id=ticket_id,
+            )
+        except ValueError as exc:
+            logger.warning(
+                "[receipt] Ticket validation failed for telegram_id=%s ticket=%s: %s",
+                chat_id,
+                ticket_id,
+                exc,
+            )
+            await update.message.reply_text(f"⚠️ {exc}")
+            return
+
         ocr_payload = receipt.model_dump(exclude_none=True)
         try:
             result = await register_deposit_payment(
@@ -401,6 +419,23 @@ async def _handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE) -
             return
 
         assert erp_client is not None, "ERP client not initialized"
+        user_phone_pdf: str = _user_phones.get(chat_id, "")
+        try:
+            await validate_ticket_ownership(
+                erp_client=erp_client,
+                user_phone=user_phone_pdf,
+                ticket_id=ticket_id,
+            )
+        except ValueError as exc:
+            logger.warning(
+                "[receipt] Ticket validation failed for telegram_id=%s ticket=%s: %s",
+                chat_id,
+                ticket_id,
+                exc,
+            )
+            await update.message.reply_text(f"⚠️ {exc}")
+            return
+
         ocr_payload = receipt.model_dump(exclude_none=True)
         try:
             result = await register_deposit_payment(

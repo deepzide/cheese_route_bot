@@ -7,10 +7,10 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
+from chatbot.ai_agent.context import WebhookContextManager
+from chatbot.ai_agent.dependencies import AgentDeps
 from chatbot.ai_agent.tests.conftest import build_run_context
 from chatbot.ai_agent.tools.notifications import stop_lead_followups
-from chatbot.ai_agent.dependencies import AgentDeps
-from chatbot.ai_agent.context import WebhookContextManager
 from chatbot.lead_followup import evaluate_follow_up_eligibility
 
 
@@ -36,7 +36,7 @@ def test_followup_is_sent_after_12h_without_reservation() -> None:
     rows = [
         FakeMessageRow(
             role="user",
-            message="Usuario - Quiero saber más",
+            message="Usuario - Quiero saber mas",
             created_at=now - timedelta(hours=13),
         ),
         _tool_row(["upsert_lead"], now - timedelta(hours=13)),
@@ -166,4 +166,4 @@ async def test_stop_lead_followups_tool_persists_opt_out() -> None:
     result = await stop_lead_followups(ctx)
 
     assert fake_db.calls == [("59812345678", "FOLLOWUP: opt_out")]
-    assert "no te voy a enviar más mensajes automáticos" in result
+    assert "mensajes automáticos de seguimiento desactivados" in result

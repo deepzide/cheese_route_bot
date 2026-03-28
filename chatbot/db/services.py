@@ -116,7 +116,12 @@ class Services:
         if not await self.get_user(phone):
             await self.create_user(phone)
 
-        data = {"user_phone": phone, "role": role, "message": message}
+        data = {
+            "user_phone": phone,
+            "role": role,
+            "message": message,
+            "active": True,
+        }
         if tools_used is not None:
             data["tools_used"] = json.dumps(tools_used)
 
@@ -131,8 +136,11 @@ class Services:
         phone: str,
         role: str | None = None,
         message: str | None = None,
+        active_only: bool = True,
     ) -> bool:
         query = message_table.select().where(message_table.c.user_phone == phone)
+        if active_only:
+            query = query.where(message_table.c.active.is_(True))
         if role is not None:
             query = query.where(message_table.c.role == role)
         if message is not None:
@@ -150,12 +158,17 @@ class Services:
         await self.create_message(phone=phone, role="system", message=message)
 
     async def reset_chat(self, phone: str):
-        logger.warning(f"Deleting chats from {phone}")
+        logger.warning(f"Logically deactivating chats from {phone}")
         user = await self.get_user(phone)
         if not user:
             return f"reset_chat: {phone} no existe"
 
-        query = message_table.delete().where(message_table.c.user_phone == phone)
+        query = (
+            message_table.update()
+            .where(message_table.c.user_phone == phone)
+            .where(message_table.c.active.is_(True))
+            .values(active=False)
+        )
         if self.debug:
             logger.debug(query)
 
@@ -169,6 +182,7 @@ class Services:
         query = (
             message_table.select()
             .where(message_table.c.user_phone == phone)
+            .where(message_table.c.active.is_(True))
             .where(message_table.c.created_at >= since)
             .order_by(message_table.c.created_at.asc())
         )
@@ -185,6 +199,7 @@ class Services:
             message_table.select()
             .where(message_table.c.user_phone == phone)
             .where(message_table.c.role == "user")
+            .where(message_table.c.active.is_(True))
             .order_by(message_table.c.created_at.desc())
             .limit(1)
         )
@@ -222,6 +237,18 @@ class Services:
         return history
 
     async def get_messages(self, phone: str):
+        query = (
+            message_table.select()
+            .where(message_table.c.user_phone == phone)
+            .where(message_table.c.active.is_(True))
+            .order_by(message_table.c.created_at.asc())
+        )
+        if self.debug:
+            logger.debug(query)
+
+        return await self.database.fetch_all(query)
+
+    async def get_all_messages(self, phone: str):
         query = (
             message_table.select()
             .where(message_table.c.user_phone == phone)

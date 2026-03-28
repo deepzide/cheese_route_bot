@@ -3,7 +3,7 @@ import time
 
 import databases
 import sqlalchemy
-from sqlalchemy import DateTime, ForeignKey, Integer, String, Text, func
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text, func
 
 from chatbot.core.config import config
 
@@ -32,6 +32,7 @@ message_table = sqlalchemy.Table(
     sqlalchemy.Column("role", String, nullable=False),
     sqlalchemy.Column("message", String, nullable=False),
     sqlalchemy.Column("tools_used", Text, nullable=True),
+    sqlalchemy.Column("active", Boolean, nullable=False, server_default=sqlalchemy.true()),
     sqlalchemy.Column("created_at", DateTime, default=func.now()),
 )
 

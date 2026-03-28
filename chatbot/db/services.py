@@ -126,6 +126,29 @@ class Services:
 
         await self.database.execute(query)
 
+    async def has_message(
+        self,
+        phone: str,
+        role: str | None = None,
+        message: str | None = None,
+    ) -> bool:
+        query = message_table.select().where(message_table.c.user_phone == phone)
+        if role is not None:
+            query = query.where(message_table.c.role == role)
+        if message is not None:
+            query = query.where(message_table.c.message == message)
+        query = query.limit(1)
+        if self.debug:
+            logger.debug(query)
+        row = await self.database.fetch_one(query)
+        return row is not None
+
+    async def ensure_system_message(self, phone: str, message: str) -> None:
+        exists = await self.has_message(phone=phone, role="system", message=message)
+        if exists:
+            return
+        await self.create_message(phone=phone, role="system", message=message)
+
     async def reset_chat(self, phone: str):
         logger.warning(f"Deleting chats from {phone}")
         user = await self.get_user(phone)

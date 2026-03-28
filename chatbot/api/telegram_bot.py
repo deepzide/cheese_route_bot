@@ -545,6 +545,10 @@ async def _handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         typing_task = asyncio.create_task(_typing_loop(context.bot, chat_id_int))
 
         try:
+            await services.ensure_system_message(
+                phone=chat_id,
+                message="CHANNEL: telegram",
+            )
             await message_handler.save_user_msg(chat_id, incoming_msg)
 
             assert erp_client is not None, "ERP client not initialized"

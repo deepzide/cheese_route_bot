@@ -23,7 +23,6 @@ from chatbot.ai_agent.tools.payments import (
     register_deposit_payment,
     validate_ticket_ownership,
 )
-from chatbot.ai_agent.models import ERP_BASE_PATH
 from chatbot.api.utils import message_handler
 from chatbot.api.utils.message_queue import Message, message_queue
 from chatbot.api.utils.text import strip_markdown
@@ -149,6 +148,10 @@ async def _process_message(message: Message) -> None:
         logger.info("=" * 80)
         logger.info("%s: %s", user_number, incoming_msg)
 
+        await services.ensure_system_message(
+            phone=user_number,
+            message="CHANNEL: whatsapp",
+        )
         await message_handler.save_user_msg(user_number, incoming_msg)
 
         deps = AgentDeps(

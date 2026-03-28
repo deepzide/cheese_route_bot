@@ -137,6 +137,13 @@ def _truncate(text: str) -> str:
     return text
 
 
+def _escape_md(text: str) -> str:
+    """Escape Telegram legacy Markdown special characters in plain-text fragments."""
+    for ch in ("*", "_", "`", "["):
+        text = text.replace(ch, f"\\{ch}")
+    return text
+
+
 def _parse_kwargs(args: list[str]) -> dict[str, str]:
     """Parse 'key=value' pairs from command args."""
     result: dict[str, str] = {}
@@ -210,7 +217,7 @@ async def cmd_list_experiences(
 
     lines = [f"🧀 *Experiencias* ({len(experiences)} resultados)\n"]
     for exp in experiences:
-        lines.append(f"• `{exp.experience_id}` — {exp.name}")
+        lines.append(f"• `{exp.experience_id}` — {_escape_md(exp.name)}")
 
     lines.append(
         "\nUsa `/get_experience_detail <id>` para ver el detalle de una experiencia."
@@ -275,7 +282,7 @@ async def cmd_list_routes(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 
     lines = [f"🗺️ *Rutas* ({len(routes)} resultados)\n"]
     for route in routes:
-        lines.append(f"• `{route.route_id}` — {route.name}")
+        lines.append(f"• `{route.route_id}` — {_escape_md(route.name)}")
 
     lines.append("\nUsa `/get_route_detail <id>` para ver el detalle de una ruta.")
     await update.message.reply_text(_truncate("\n".join(lines)), parse_mode="Markdown")
@@ -339,7 +346,7 @@ async def cmd_list_establishments(
 
     lines = [f"🏠 *Establecimientos* ({len(establishments)} resultados)\n"]
     for est in establishments:
-        lines.append(f"• `{est.establishment_id}` — {est.name}")
+        lines.append(f"• `{est.establishment_id}` — {_escape_md(est.name)}")
 
     lines.append("\nUsa `/get_establishment_details <id>` para ver el detalle.")
     await update.message.reply_text(_truncate("\n".join(lines)), parse_mode="Markdown")
@@ -653,7 +660,7 @@ async def cmd_get_reservations(
     lines = [f"🎟️ *Reservas* ({result.total} en total)\n"]
     for ticket in result.tickets:
         lines.append(
-            f"• `{ticket.name}` — {ticket.experience_name or ticket.experience or ''} — *{ticket.status}*"
+            f"• `{ticket.name}` — {_escape_md(ticket.experience_name or ticket.experience or '')} — *{ticket.status}*"
         )
     if result.total and result.total > len(result.tickets):
         lines.append(

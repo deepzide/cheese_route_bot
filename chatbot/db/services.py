@@ -16,7 +16,12 @@ from pydantic_ai.messages import (
 )
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-from chatbot.db.schema import init_db, message_table, users_table
+from chatbot.db.schema import (
+    deposit_reminders_table,
+    init_db,
+    message_table,
+    users_table,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -272,6 +277,56 @@ class Services:
     async def get_chat_str(self, phone: str) -> str:
         messages = await self.get_chat(phone)
         return json.dumps(messages)
+
+    async def register_confirmed_ticket(self, ticket_id: str, phone: str) -> None:
+        """Registra un ticket confirmado para el seguimiento del recordatorio de seña.
+
+        Si el ticket ya existe (re-confirmación), no hace nada.
+        """
+        existing = await self.database.fetch_one(
+            deposit_reminders_table.select().where(
+                deposit_reminders_table.c.ticket_id == ticket_id
+            )
+        )
+        if existing:
+            logger.debug(
+                "[deposit_reminders] ticket_id=%s ya registrado, ignorando", ticket_id
+            )
+            return
+        query = deposit_reminders_table.insert().values(
+            ticket_id=ticket_id,
+            phone=phone,
+            confirmed_at=datetime.now(UTC).replace(tzinfo=None),
+            reminded_at=None,
+        )
+        await self.database.execute(query)
+        logger.info(
+            "[deposit_reminders] Ticket registrado para recordatorio: ticket_id=%s phone=%s",
+            ticket_id,
+            phone,
+        )
+
+    async def get_unreminded_tickets(self, cutoff: datetime) -> list:
+        """Devuelve los tickets confirmados antes de *cutoff* cuyo recordatorio aún no fue enviado."""
+        query = (
+            deposit_reminders_table.select()
+            .where(deposit_reminders_table.c.confirmed_at <= cutoff)
+            .where(deposit_reminders_table.c.reminded_at.is_(None))
+        )
+        return await self.database.fetch_all(query)
+
+    async def mark_deposit_reminder_sent(self, ticket_id: str) -> None:
+        """Marca el recordatorio de un ticket como enviado."""
+        query = (
+            deposit_reminders_table.update()
+            .where(deposit_reminders_table.c.ticket_id == ticket_id)
+            .values(reminded_at=datetime.now(UTC).replace(tzinfo=None))
+        )
+        await self.database.execute(query)
+        logger.info(
+            "[deposit_reminders] Recordatorio marcado como enviado: ticket_id=%s",
+            ticket_id,
+        )
 
 
 database = init_db()

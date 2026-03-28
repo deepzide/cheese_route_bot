@@ -36,6 +36,15 @@ message_table = sqlalchemy.Table(
     sqlalchemy.Column("created_at", DateTime, default=func.now()),
 )
 
+deposit_reminders_table = sqlalchemy.Table(
+    "deposit_reminders",
+    metadata,
+    sqlalchemy.Column("ticket_id", String, primary_key=True),
+    sqlalchemy.Column("phone", String, nullable=False),
+    sqlalchemy.Column("confirmed_at", DateTime, nullable=False),
+    sqlalchemy.Column("reminded_at", DateTime, nullable=True),
+)
+
 # Database connection retry settings
 DB_MAX_RETRIES = 5
 DB_RETRY_DELAY = 3  # seconds

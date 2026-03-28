@@ -10,7 +10,9 @@ import httpx
 from chatbot.ai_agent.models import ERP_BASE_PATH, PaymentInstructions
 from chatbot.ai_agent.tools.erp_utils import extract_erp_data
 from chatbot.db.services import Services
+from chatbot.reminders.lead_followup import CHANNEL_TELEGRAM, infer_channel
 from chatbot.messaging.telegram_notifier import notify_error
+from chatbot.messaging.telegram_notifier import send_message as send_telegram_message
 from chatbot.messaging.whatsapp import whatsapp_manager
 
 logger = logging.getLogger(__name__)
@@ -122,19 +124,26 @@ async def process_pending_deposit_reminders(
                 continue
 
             message = _build_reminder_message(pay_info)
-            ok = await whatsapp_manager.send_text(user_number=phone, text=message)
+            messages = await db_services.get_messages(phone)
+            channel = infer_channel(conversation_id=phone, messages=messages)
+            if channel == CHANNEL_TELEGRAM:
+                ok = await send_telegram_message(chat_id=phone, text=message)
+            else:
+                ok = await whatsapp_manager.send_text(user_number=phone, text=message)
             if not ok:
                 logger.error(
-                    "[deposit_reminder] Error enviando recordatorio a %s (ticket=%s)",
+                    "[deposit_reminder] Error enviando recordatorio a %s via %s (ticket=%s)",
                     phone,
+                    channel,
                     ticket_id,
                 )
                 continue
 
             await db_services.mark_deposit_reminder_sent(ticket_id)
             logger.info(
-                "[deposit_reminder] Recordatorio enviado a %s (ticket=%s amount_remaining=%s)",
+                "[deposit_reminder] Recordatorio enviado a %s via %s (ticket=%s amount_remaining=%s)",
                 phone,
+                channel,
                 ticket_id,
                 pay_info.amount_remaining,
             )

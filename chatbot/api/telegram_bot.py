@@ -32,7 +32,10 @@ from chatbot.ai_agent.context import webhook_context_manager
 from chatbot.ai_agent.dependencies import AgentDeps
 from chatbot.ai_agent.error_agent import run_error_agent
 from chatbot.ai_agent.summary_agent import summarize_conversation
-from chatbot.ai_agent.tools.ocr import extract_payment_receipt, extract_payment_receipt_from_pdf
+from chatbot.ai_agent.tools.ocr import (
+    extract_payment_receipt,
+    extract_payment_receipt_from_pdf,
+)
 from chatbot.ai_agent.tools.payments import (
     erp_validation_user_message,
     parse_amount,
@@ -63,8 +66,10 @@ from chatbot.core.config import config
 from chatbot.core.logging_conf import init_logging
 from chatbot.db.services import services
 from chatbot.erp.client import build_erp_client
+from chatbot.erp.transcript import upload_message_transcript
 from chatbot.messaging.telegram_notifier import notify_error
 from chatbot.messaging.whatsapp import WhatsAppManager
+from chatbot.reminders.lead_followup import CHANNEL_MARKERS, CHANNEL_TELEGRAM
 
 logger = logging.getLogger(__name__)
 
@@ -547,7 +552,7 @@ async def _handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         try:
             await services.ensure_system_message(
                 phone=chat_id,
-                message="CHANNEL: telegram",
+                message=CHANNEL_MARKERS[CHANNEL_TELEGRAM],
             )
             await message_handler.save_user_msg(chat_id, incoming_msg)
 
@@ -653,6 +658,15 @@ async def _handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             await message_handler.save_assistant_msg(chat_id, ai_response, tools_used)
             await update.message.reply_text(ai_response)
             asyncio.create_task(_maybe_compress_history(chat_id, len(history)))
+            assert erp_client is not None
+            asyncio.create_task(
+                upload_message_transcript(
+                    client=erp_client,
+                    phone_number=_user_phones.get(chat_id, chat_id),
+                    user_message=incoming_msg,
+                    bot_response=ai_response,
+                )
+            )
 
         finally:
             typing_task.cancel()

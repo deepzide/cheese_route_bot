@@ -28,6 +28,7 @@ Commands registered:
 
 from __future__ import annotations
 
+import html
 import json
 import logging
 from typing import Any
@@ -672,17 +673,18 @@ async def cmd_get_reservations(
         await update.message.reply_text(msg + ".", parse_mode="Markdown")
         return
 
-    lines = [f"🎟️ *Reservas* ({result.total} en total)\n"]
+    lines = [f"🎟️ <b>Reservas</b> ({result.total} en total)\n"]
     for ticket in result.tickets:
+        exp = html.escape(ticket.experience_name or ticket.experience or "")
         lines.append(
-            f"• `{ticket.name}` — {_escape_md(ticket.experience_name or ticket.experience or '')} — *{ticket.status}*"
+            f"• <code>{html.escape(ticket.name)}</code> — {exp} — <b>{html.escape(ticket.status or '')}</b>"
         )
     if result.total and result.total > len(result.tickets):
         lines.append(
-            f"\n_Mostrando {len(result.tickets)} de {result.total}. "
-            "Usa `/get_reservations` con filtro de estado para ver más._"
+            f"\n<i>Mostrando {len(result.tickets)} de {result.total}. "
+            "Usa /get_reservations con filtro de estado para ver más.</i>"
         )
-    await update.message.reply_text(_truncate("\n".join(lines)), parse_mode="Markdown")
+    await update.message.reply_text(_truncate("\n".join(lines)), parse_mode="HTML")
 
 
 # ---------------------------------------------------------------------------

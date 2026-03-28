@@ -23,6 +23,7 @@ Commands registered:
   /get_itinerary
   /cancel_reservation             <ticket_id>
   /stop_followups
+  /start_followups
 """
 
 from __future__ import annotations
@@ -34,6 +35,7 @@ from typing import Any
 import httpx
 from pydantic import BaseModel
 from pydantic_ai import RunContext
+from pydantic_ai.exceptions import ModelRetry
 from telegram import Update
 from telegram.ext import ContextTypes
 
@@ -59,7 +61,10 @@ from chatbot.ai_agent.tools.catalog import (
     list_routes,
 )
 from chatbot.ai_agent.tools.customer import update_contact, upsert_lead
-from chatbot.ai_agent.tools.notifications import stop_lead_followups
+from chatbot.ai_agent.tools.notifications import (
+    start_lead_followups,
+    stop_lead_followups,
+)
 from chatbot.db.services import services
 from chatbot.messaging.telegram_notifier import notify_error
 from chatbot.messaging.whatsapp import WhatsAppManager
@@ -174,6 +179,11 @@ async def _send_error(
     context_str: str,
 ) -> None:
     """Log, notify dev, and reply with a friendly error message."""
+    if isinstance(exc, ModelRetry):
+        # ModelRetry is a flow-control signal, not a real error — show the message to the user
+        if update.message:
+            await update.message.reply_text(f"ℹ️ {exc.message}")
+        return
     logger.exception("Error in command %s: %s", context_str, exc)
     await notify_error(exc, context=f"telegram_cmd | {context_str}")
     if update.message:
@@ -373,7 +383,7 @@ async def cmd_get_establishment_details(
         )
         return
 
-    establishment_id = args[0]
+    establishment_id = " ".join(args)
     ctx = _build_ctx(chat_id)
     try:
         detail = await get_establishment_details(ctx, establishment_id=establishment_id)
@@ -407,7 +417,10 @@ async def cmd_get_availability(
         )
         return
 
-    experience_id, date_from, date_to = args[0], args[1], args[2]
+    # Las fechas siempre son los dos últimos args; el resto forma el experience_id
+    date_to = args[-1]
+    date_from = args[-2]
+    experience_id = " ".join(args[:-2])
     ctx = _build_ctx(chat_id)
     try:
         availability = await get_availability(
@@ -446,7 +459,10 @@ async def cmd_get_route_availability(
         )
         return
 
-    route_id, date, party_str = args[0], args[1], args[2]
+    # El número de personas siempre es el último arg; la fecha el penúltimo
+    party_str = args[-1]
+    date = args[-2]
+    route_id = " ".join(args[:-2])
     try:
         party_size = int(party_str)
     except ValueError:
@@ -531,8 +547,7 @@ async def cmd_update_contact(
 
     if not any([name, email]):
         await update.message.reply_text(
-            "❌ No se detectaron campos válidos. "
-            "Usa `nombre=X` o `email=X`.",
+            "❌ No se detectaron campos válidos. Usa `nombre=X` o `email=X`.",
             parse_mode="Markdown",
         )
         return
@@ -810,7 +825,9 @@ async def cmd_list_available_experiences(
     lines = [f"📅 *Disponibilidad* ({len(availabilities)} experiencias)\n"]
     for av in availabilities:
         slot_count = len(av.slots) if av.slots else 0
-        lines.append(f"• `{av.experience_id}` — {av.experience_name or ''} ({slot_count} slots)")
+        lines.append(
+            f"• `{av.experience_id}` — {av.experience_name or ''} ({slot_count} slots)"
+        )
 
     lines.append(
         "\nUsa `/get_availability <experience_id> <date_from> <date_to>` para ver los slots en detalle."
@@ -836,6 +853,28 @@ async def cmd_stop_followups(
         msg = await stop_lead_followups(ctx)
     except Exception as exc:
         await _send_error(update, exc, "cmd_stop_followups")
+        return
+
+    await update.message.reply_text(f"✅ {msg}")
+
+
+# /start_followups
+# ---------------------------------------------------------------------------
+
+
+async def cmd_start_followups(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> None:
+    """/start_followups — reactiva los mensajes automáticos de seguimiento."""
+    if not update.message or not update.effective_chat:
+        return
+    chat_id = str(update.effective_chat.id)
+
+    ctx = _build_ctx(chat_id)
+    try:
+        msg = await start_lead_followups(ctx)
+    except Exception as exc:
+        await _send_error(update, exc, "cmd_start_followups")
         return
 
     await update.message.reply_text(f"✅ {msg}")

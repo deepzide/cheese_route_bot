@@ -44,15 +44,22 @@ from chatbot.ai_agent.tools.payments import (
 )
 from chatbot.api.utils import message_handler, telegram_commands
 from chatbot.api.utils.telegram_commands import (
+    cmd_cancel_reservation,
     cmd_get_availability,
     cmd_get_establishment_details,
     cmd_get_experience_detail,
+    cmd_get_itinerary,
+    cmd_get_reservation_status,
+    cmd_get_reservations,
     cmd_get_route_availability,
+    cmd_get_route_booking_status,
     cmd_get_route_detail,
+    cmd_list_available_experiences,
     cmd_list_establishments,
     cmd_list_experiences,
     cmd_list_routes,
     cmd_resolve_or_create_contact,
+    cmd_stop_followups,
     cmd_update_contact,
     cmd_upsert_lead,
 )
@@ -700,6 +707,7 @@ async def _post_init(application: Application) -> None:
     await services.database.connect()
     erp_client = build_erp_client()
     telegram_commands.init(erp_client)
+    telegram_commands.init_phones(_user_phones)
     logger.info("✅ DB connected and ERP client ready")
 
 
@@ -755,6 +763,21 @@ def build_application() -> Application:
     )
     app.add_handler(CommandHandler("update_contact", cmd_update_contact))
     app.add_handler(CommandHandler("upsert_lead", cmd_upsert_lead))
+
+    # Booking commands — bypass AI agent
+    app.add_handler(
+        CommandHandler("get_reservation_status", cmd_get_reservation_status)
+    )
+    app.add_handler(CommandHandler("get_reservations", cmd_get_reservations))
+    app.add_handler(
+        CommandHandler("get_route_booking_status", cmd_get_route_booking_status)
+    )
+    app.add_handler(CommandHandler("get_itinerary", cmd_get_itinerary))
+    app.add_handler(CommandHandler("cancel_reservation", cmd_cancel_reservation))
+    app.add_handler(
+        CommandHandler("list_available_experiences", cmd_list_available_experiences)
+    )
+    app.add_handler(CommandHandler("stop_followups", cmd_stop_followups))
 
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, _handle_message))
     app.add_handler(MessageHandler(filters.PHOTO, _handle_image))

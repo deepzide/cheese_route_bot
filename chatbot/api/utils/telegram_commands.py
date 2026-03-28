@@ -151,12 +151,13 @@ def _escape_md(text: str) -> str:
 
 
 def _parse_kwargs(args: list[str]) -> dict[str, str]:
-    """Parse 'key=value' pairs from command args."""
+    """Parse 'key=value' pairs from command args, tolerating bracketed or quoted values."""
     result: dict[str, str] = {}
     for arg in args:
+        arg = arg.strip("[]")  # tolerate users copying the usage hint literally
         if "=" in arg:
             key, _, value = arg.partition("=")
-            result[key.strip().lower()] = value.strip()
+            result[key.strip().lower()] = value.strip().strip("\"'")
     return result
 
 

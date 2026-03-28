@@ -27,33 +27,40 @@ async def update_contact(
     ctx: RunContext[AgentDeps],
     name: str | None = None,
     email: str | None = None,
+    preferred_language: str | None = None,
 ) -> UpdateContactResult | str:
     """Update one or more fields of the current contact.
 
     Pass only the fields you want to change; omit those that already have the correct value.
+    Always detect the language the user is writing in and pass it as ``preferred_language``
+    (e.g. "Spanish", "English", "French", "Portuguese", "German").
 
     Args:
         ctx: Agent run context with dependencies.
         name: New display name (only if it differs from the current one).
         email: New email address (only if it differs from the current one).
+        preferred_language: Language detected from the user's messages (e.g. "Spanish", "English").
     """
     logger.info(
-        "[update_contact] contact_id=%s name=%s email=%s",
+        "[update_contact] contact_id=%s name=%s email=%s preferred_language=%s",
         ctx.deps.contact_id,
         name,
         email,
+        preferred_language,
     )
     if not ctx.deps.contact_id:
         raise ValueError("contact_id is required in AgentDeps to update a contact")
 
-    if not any([name, email]):
-        return "No fields to update. Provide at least one of name or email."
+    if not any([name, email, preferred_language]):
+        return "No fields to update. Provide at least one of name, email or preferred_language."
 
     payload: dict[str, Any] = {"contact_id": ctx.deps.contact_id}
     if name is not None:
         payload["name"] = name
     if email is not None:
         payload["email"] = email
+    if preferred_language is not None:
+        payload["preferred_language"] = preferred_language
 
     response = await ctx.deps.erp_client.post(
         f"{ERP_BASE_PATH}.contact_controller.update_contact",

@@ -989,9 +989,9 @@ class PaymentReceipt(BaseModel):
 class TicketDecision(StrEnum):
     """Possible outcomes for a pending reservation ticket."""
 
-    APPROVED = "approved"
-    REJECTED = "rejected"
-    EXPIRED = "expired"
+    APPROVED = "CONFIRMED"
+    REJECTED = "REJECTED"
+    EXPIRED = "EXPIRED"
 
 
 class ERPSendMessageRequest(BaseModel):

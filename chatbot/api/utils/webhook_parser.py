@@ -6,7 +6,10 @@ from pathlib import Path
 import httpx
 
 from chatbot.ai_agent.models import PaymentReceipt
-from chatbot.ai_agent.tools.ocr import extract_payment_receipt, extract_payment_receipt_from_pdf
+from chatbot.ai_agent.tools.ocr import (
+    extract_payment_receipt,
+    extract_payment_receipt_from_pdf,
+)
 from chatbot.audio.audio_converter import convert_ogg_to_mp3
 from chatbot.audio.stt import AVAILABLE_AUDIO_FORMATS, transcribe_audio
 from chatbot.core.config import config
@@ -18,6 +21,32 @@ MEDIA_REQUEST_TIMEOUT_SECONDS = 20.0
 
 # Regex to match ERP ticket IDs like TKT-2026-03-00018
 _TICKET_ID_RE = re.compile(r"TKT-\d{4}-\d{2}-\d+", re.IGNORECASE)
+
+
+def _get_meta_headers() -> dict[str, str]:
+    return {"Authorization": f"Bearer {config.WHATSAPP_ACCESS_TOKEN}"}
+
+
+async def _resolve_media_url(client: httpx.AsyncClient, media_id: str) -> str | None:
+    """Resuelve la URL de descarga de un media de WhatsApp a partir de su ID.
+
+    Args:
+        client: Cliente HTTP async reutilizado.
+        media_id: ID del media devuelto por el webhook de Meta.
+
+    Returns:
+        URL firmada para descargar el archivo, o None si no está disponible.
+    """
+    meta_resp = await client.get(
+        f"{API_BASE}/{media_id}",
+        headers=_get_meta_headers(),
+        timeout=META_REQUEST_TIMEOUT_SECONDS,
+    )
+    meta_resp.raise_for_status()
+    url: str | None = meta_resp.json().get("url")
+    if not url:
+        logger.error("No media url for media id %s", media_id)
+    return url
 
 
 @dataclass
@@ -81,20 +110,11 @@ async def extract_message_content(webhook_data: dict) -> ParsedMessage | None:
                 logger.error("Image message without media id")
                 return None
 
-            media_meta_url = f"{API_BASE}/{media_id}"
-            headers = {"Authorization": f"Bearer {config.WHATSAPP_ACCESS_TOKEN}"}
+            headers = _get_meta_headers()
             timeout = httpx.Timeout(MEDIA_REQUEST_TIMEOUT_SECONDS)
             async with httpx.AsyncClient(timeout=timeout) as client:
-                meta_resp = await client.get(
-                    media_meta_url,
-                    headers=headers,
-                    timeout=META_REQUEST_TIMEOUT_SECONDS,
-                )
-                meta_resp.raise_for_status()
-                meta_json = meta_resp.json()
-                media_url = meta_json.get("url")
+                media_url = await _resolve_media_url(client, media_id)
                 if not media_url:
-                    logger.error(f"No media url for media id {media_id}")
                     return None
 
                 try:
@@ -131,20 +151,11 @@ async def extract_message_content(webhook_data: dict) -> ParsedMessage | None:
                 logger.error("Document message without media id")
                 return None
 
-            media_meta_url = f"{API_BASE}/{media_id}"
-            headers = {"Authorization": f"Bearer {config.WHATSAPP_ACCESS_TOKEN}"}
+            headers = _get_meta_headers()
             timeout = httpx.Timeout(MEDIA_REQUEST_TIMEOUT_SECONDS)
             async with httpx.AsyncClient(timeout=timeout) as client:
-                meta_resp = await client.get(
-                    media_meta_url,
-                    headers=headers,
-                    timeout=META_REQUEST_TIMEOUT_SECONDS,
-                )
-                meta_resp.raise_for_status()
-                meta_json = meta_resp.json()
-                media_url = meta_json.get("url")
+                media_url = await _resolve_media_url(client, media_id)
                 if not media_url:
-                    logger.error(f"No media url for document media id {media_id}")
                     return None
 
                 try:
@@ -173,20 +184,11 @@ async def extract_message_content(webhook_data: dict) -> ParsedMessage | None:
                 logger.error("Audio message without media id")
                 return None
 
-            media_meta_url = f"{API_BASE}/{media_id}"
-            headers = {"Authorization": f"Bearer {config.WHATSAPP_ACCESS_TOKEN}"}
+            headers = _get_meta_headers()
             timeout = httpx.Timeout(MEDIA_REQUEST_TIMEOUT_SECONDS)
             async with httpx.AsyncClient(timeout=timeout) as client:
-                meta_resp = await client.get(
-                    media_meta_url,
-                    headers=headers,
-                    timeout=META_REQUEST_TIMEOUT_SECONDS,
-                )
-                meta_resp.raise_for_status()
-                meta_json = meta_resp.json()
-                media_url = meta_json.get("url")
+                media_url = await _resolve_media_url(client, media_id)
                 if not media_url:
-                    logger.error(f"No media url for media id {media_id}")
                     return None
 
                 try:

@@ -34,11 +34,12 @@ async def create_pending_reservation(
     experience_id: str,
     slot_id: str,
     party_size: int,
-) -> PendingTicket:
+) -> PendingTicket | str:
     """Create a PENDING ticket reservation for an experience slot.
 
     The ticket expires shortly after creation. The user must confirm payment
-    before it becomes CONFIRMED. Requires a resolved contact_id in deps.
+    before it becomes CONFIRMED. Requires a resolved contact_id and user_name in deps.
+    If user_name is missing, ask the user for their name and call update_contact first.
 
     Args:
         ctx: Agent run context with dependencies.
@@ -55,6 +56,8 @@ async def create_pending_reservation(
     )
     if not ctx.deps.contact_id:
         raise ValueError("contact_id is required in AgentDeps to create a reservation")
+    if not ctx.deps.user_name:
+        return "Antes de crear la reserva necesito el nombre del cliente. Pídele su nombre al usuario y llama a update_contact con el valor obtenido."
 
     response = await ctx.deps.erp_client.post(
         f"{ERP_BASE_PATH}.ticket_controller.create_pending_reservation",
@@ -227,12 +230,14 @@ async def create_route_reservation(
     date_from: str,
     date_to: str,
     party_size: int,
-) -> PendingRouteBooking:
+) -> PendingRouteBooking | str:
     """Create a PENDING route booking that bundles multiple experience tickets.
 
     After calling this tool, ALWAYS call get_route_booking_status with the
     returned route_booking_id to retrieve the individual ticket_id of each
     experience in the route and share them with the user.
+    Requires a resolved contact_id and user_name in deps.
+    If user_name is missing, ask the user for their name and call update_contact first.
 
     Args:
         ctx: Agent run context with dependencies.
@@ -253,6 +258,8 @@ async def create_route_reservation(
         raise ValueError(
             "contact_id is required in AgentDeps to create a route reservation"
         )
+    if not ctx.deps.user_name:
+        return "Antes de crear la reserva de ruta necesito el nombre del cliente. Pídele su nombre al usuario y llama a update_contact con el valor obtenido."
 
     response = await ctx.deps.erp_client.post(
         f"{ERP_BASE_PATH}.route_booking_controller.create_route_reservation",

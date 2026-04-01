@@ -14,7 +14,8 @@ from chatbot.ai_agent.instructions import (
     get_current_itinerary_context,
     resolve_or_create_contact,
 )
-from chatbot.ai_agent.models import GoogleModel
+from chatbot.ai_agent.models import ERP_BASE_PATH, GoogleModel, ReservationStatus
+from chatbot.ai_agent.tools.erp_utils import extract_erp_data
 from chatbot.ai_agent.tools.booking import (
     cancel_reservation,
     confirm_modification,
@@ -42,7 +43,7 @@ from chatbot.ai_agent.tools.customer import (
 from chatbot.ai_agent.tools.date_resolver import resolve_relative_date
 from chatbot.ai_agent.tools.notifications import stop_lead_followups
 from chatbot.ai_agent.tools.payments import get_payment_instructions
-from chatbot.ai_agent.tools.support import create_complaint
+from chatbot.ai_agent.tools.support import create_complaint, submit_survey
 
 logger = logging.getLogger(__name__)
 ERP_TIMEOUT_SECONDS = 15.0
@@ -68,6 +69,44 @@ def _once_per_turn(tool_name: str):
         return tool_def
 
     return prepare
+
+
+async def _only_if_completed_reservations(
+    ctx: RunContext[AgentDeps], tool_def: ToolDefinition
+) -> ToolDefinition | None:
+    """Show submit_survey only when the customer has at least one COMPLETED reservation."""
+    if ctx.deps.has_completed_reservations is None:
+        if not ctx.deps.user_phone:
+            ctx.deps.has_completed_reservations = False
+        else:
+            try:
+                response = await ctx.deps.erp_client.post(
+                    f"{ERP_BASE_PATH}.ticket_controller.get_reservations_by_phone",
+                    json={
+                        "phone": ctx.deps.user_phone,
+                        "status": ReservationStatus.COMPLETED,
+                        "page": 1,
+                        "page_size": 1,
+                    },
+                    timeout=ERP_TIMEOUT_SECONDS,
+                )
+                response.raise_for_status()
+                data = extract_erp_data(response.json())
+                ctx.deps.has_completed_reservations = (data.get("total", 0) or 0) > 0
+            except Exception:
+                logger.debug(
+                    "[_only_if_completed_reservations] could not check reservations for %s",
+                    ctx.deps.user_phone,
+                )
+                ctx.deps.has_completed_reservations = False
+
+    if ctx.deps.has_completed_reservations:
+        return tool_def
+
+    logger.debug(
+        "[submit_survey] hidden — no completed reservations for %s", ctx.deps.user_phone
+    )
+    return None
 
 
 AGENT_TOOLS = [
@@ -101,6 +140,7 @@ AGENT_TOOLS = [
     resolve_relative_date,
     # Support & complaints
     create_complaint,
+    Tool(submit_survey, prepare=_only_if_completed_reservations),
 ]
 
 

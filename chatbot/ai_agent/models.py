@@ -891,6 +891,23 @@ class DepositPaymentResult(BaseModel):
 # ---------------------------------------------------------------------------
 
 
+class SurveyResult(BaseModel):
+    """Response from survey_controller.submit_survey_response.
+
+    ERP response fields: survey_id, ticket_id, rating, comment,
+    answered_at, is_new, support_case_created, support_case_id.
+    """
+
+    survey_id: str
+    ticket_id: str
+    rating: int
+    comment: str | None = None
+    answered_at: str | None = None
+    is_new: bool = True
+    support_case_created: bool = False
+    support_case_id: str | None = None
+
+
 class ComplaintResult(BaseModel):
     """Response from complaint_controller.create_complaint.
 

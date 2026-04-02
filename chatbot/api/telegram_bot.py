@@ -18,9 +18,11 @@ from dataclasses import dataclass
 from typing import Any
 
 import httpx
+from pydantic import ValidationError
 from pydantic_ai.exceptions import UsageLimitExceeded
 from telegram import Message, Update
 from telegram.constants import ChatAction
+from telegram.error import TelegramError
 from telegram.ext import (
     Application,
     CommandHandler,
@@ -47,6 +49,11 @@ from chatbot.ai_agent.tools.payments import (
     validate_ticket_ownership,
 )
 from chatbot.api.utils import message_handler, telegram_commands
+from chatbot.api.utils.qr import (
+    build_qr_caption,
+    build_qr_image_url,
+    fetch_reservation_qr,
+)
 from chatbot.api.utils.survey_feedback import (
     clear_pending_survey,
     extract_survey_feedback,
@@ -289,6 +296,47 @@ async def _complete_payment(
             f"Amount remaining: {result.amount_remaining}"
         )
     await message.reply_text(reply, do_quote=True)
+    if result.is_complete:
+        await _fetch_and_send_qr(chat_id=chat_id, message=message, ticket_id=ticket_id)
+
+
+async def _fetch_and_send_qr(chat_id: str, message: Message, ticket_id: str) -> None:
+    """Obtiene el QR de check-in del ERP y lo envía al usuario por Telegram."""
+    assert erp_client is not None, "ERP client not initialized"
+
+    try:
+        qr_data = await fetch_reservation_qr(erp_client=erp_client, ticket_id=ticket_id)
+        qr_image_url = build_qr_image_url(qr_data.qr_image_url)
+        caption = build_qr_caption(ticket_id=qr_data.ticket_id, token=qr_data.token)
+        await message.reply_photo(photo=qr_image_url, caption=caption, do_quote=True)
+        logger.info(
+            "[qr] QR sent to Telegram chat_id=%s ticket_id=%s qr_token_id=%s",
+            chat_id,
+            qr_data.ticket_id,
+            qr_data.qr_token_id,
+        )
+    except (
+        httpx.HTTPError,
+        TelegramError,
+        ValidationError,
+        ValueError,
+    ) as exc:
+        logger.error(
+            "[qr] Failed to fetch/send QR for telegram_id=%s ticket_id=%s: %s",
+            chat_id,
+            ticket_id,
+            exc,
+            exc_info=True,
+        )
+        await notify_error(
+            exc,
+            context=f"telegram_bot._fetch_and_send_qr | chat_id={chat_id} | ticket={ticket_id}",
+        )
+        await message.reply_text(
+            "Your payment was completed, but I couldn't send your check-in QR right now. "
+            "Please contact a human agent so they can share it with you.",
+            do_quote=True,
+        )
 
 
 async def _handle_pending_survey_response(

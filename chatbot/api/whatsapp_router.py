@@ -10,6 +10,7 @@ import httpx
 from dotenv import load_dotenv
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Request
 from fastapi.responses import PlainTextResponse
+from pydantic import ValidationError
 from pydantic_ai import AgentRunResult
 from pydantic_ai.exceptions import ModelAPIError, UsageLimitExceeded
 from pydantic_ai.messages import ModelResponse, ToolCallPart
@@ -33,6 +34,11 @@ from chatbot.ai_agent.tools.payments import (
 )
 from chatbot.api.utils import message_handler
 from chatbot.api.utils.message_queue import Message, message_queue
+from chatbot.api.utils.qr import (
+    build_qr_caption,
+    build_qr_image_url,
+    fetch_reservation_qr,
+)
 from chatbot.api.utils.survey_feedback import (
     clear_pending_survey,
     extract_survey_feedback,
@@ -335,6 +341,7 @@ async def _register_and_notify_payment(
         await _fetch_and_send_qr(
             user_number=user_number,
             ticket_id=ticket_id,
+            message_id=message_id,
         )
     else:
         msg = (
@@ -839,7 +846,11 @@ async def _process_image_receipt(
         await whatsapp_manager.send_text(
             user_number=user_number, text=msg, message_id=message_id
         )
-        await _fetch_and_send_qr(user_number=user_number, ticket_id=ticket_id)
+        await _fetch_and_send_qr(
+            user_number=user_number,
+            ticket_id=ticket_id,
+            message_id=message_id,
+        )
     else:
         msg = (
             f"✅ Payment registered successfully.\n"
@@ -852,7 +863,11 @@ async def _process_image_receipt(
         )
 
 
-async def _fetch_and_send_qr(user_number: str, ticket_id: str) -> None:
+async def _fetch_and_send_qr(
+    user_number: str,
+    ticket_id: str,
+    message_id: str | None = None,
+) -> None:
     """Obtiene el QR de check-in del ERP y lo envía al usuario por WhatsApp.
 
     Args:
@@ -860,4 +875,41 @@ async def _fetch_and_send_qr(user_number: str, ticket_id: str) -> None:
         ticket_id: Identificador del ticket para el que se solicita el QR.
     """
     logger.info("[_fetch_and_send_qr] user=%s ticket_id=%s", user_number, ticket_id)
-    return
+    try:
+        qr_data = await fetch_reservation_qr(erp_client=erp_client, ticket_id=ticket_id)
+        qr_image_url = build_qr_image_url(qr_data.qr_image_url)
+        caption = build_qr_caption(ticket_id=qr_data.ticket_id, token=qr_data.token)
+        sent = await whatsapp_manager.send_image(
+            to=user_number,
+            image_url=qr_image_url,
+            caption=caption,
+            message_id=message_id,
+        )
+        if not sent:
+            raise RuntimeError("WhatsApp image delivery failed")
+        logger.info(
+            "[qr] QR sent to WhatsApp user=%s ticket_id=%s qr_token_id=%s",
+            user_number,
+            qr_data.ticket_id,
+            qr_data.qr_token_id,
+        )
+    except (httpx.HTTPError, ValidationError, ValueError, RuntimeError) as exc:
+        logger.error(
+            "[qr] Failed to fetch/send QR for user=%s ticket_id=%s: %s",
+            user_number,
+            ticket_id,
+            exc,
+            exc_info=True,
+        )
+        await notify_error(
+            exc,
+            context=f"_fetch_and_send_qr | user={user_number} | ticket={ticket_id}",
+        )
+        await whatsapp_manager.send_text(
+            user_number=user_number,
+            text=(
+                "Your payment was completed, but I couldn't send your check-in QR right now. "
+                "Please contact a human agent so they can share it with you."
+            ),
+            message_id=message_id,
+        )

@@ -889,6 +889,23 @@ class DepositPaymentResult(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# 12. QR and Check-in
+# ---------------------------------------------------------------------------
+
+
+class ReservationQrData(BaseModel):
+    """QR token payload returned by qr_controller.get_qr_for_reservation."""
+
+    qr_token_id: str
+    token: str
+    ticket_id: str
+    status: str
+    expires_at: str | None = None
+    qr_image_url: str = Field(min_length=1)
+    is_new: bool = False
+
+
+# ---------------------------------------------------------------------------
 # 14. Survey and Complaints
 # ---------------------------------------------------------------------------
 

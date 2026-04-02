@@ -105,12 +105,12 @@ async def update_contact(
                 name,
             )
             raise ModelRetry(
-                "El ERP no permite guardar un nombre que ya usa otro contacto. "
-                "No repitas ese mismo nombre. "
-                "Pídele al usuario su nombre completo o un nombre mas especifico "
-                "y vuelve a llamar a update_contact con ese nuevo valor. "
-                "Si tambien necesitas guardar email o preferred_language, "
-                "hazlo en una llamada separada sin enviar name."
+                "The ERP does not allow saving a name that is already used by another contact. "
+                "Do not repeat that same name. "
+                "Ask the user for their full name or a more specific name "
+                "and call update_contact again with that new value. "
+                "If you also need to save email or preferred_language, "
+                "do it in a separate call without sending name."
             )
     response.raise_for_status()
     data: dict[str, Any] = extract_erp_data(response.json())

@@ -36,8 +36,8 @@ router = APIRouter(dependencies=[Depends(get_api_key)])
 ERP_TIMEOUT: float = 15.0
 WHATSAPP_WINDOW_HOURS: int = 24
 SURVEY_MESSAGE: str = (
-    "Queremos conocer tu opinión sobre la experiencia que acabas de completar. "
-    "Por favor responde con una valoración del 1 al 5 y, si quieres, un comentario.\n\n"
+    "We'd love to hear your feedback about the experience you just completed. "
+    "Please reply with a rating from 1 to 5 and, if you want, a short comment.\n\n"
 )
 
 # ---------------------------------------------------------------------------
@@ -46,19 +46,34 @@ SURVEY_MESSAGE: str = (
 
 _TICKET_MESSAGES: dict[TicketDecision, str] = {
     TicketDecision.APPROVED: (
-        "✅ ¡Buenas noticias! Tu reserva *{ticket_id}* ha sido *confirmada* por el establecimiento. "
+        "✅ Good news! Your reservation *{ticket_id}* has been *confirmed* by the establishment. "
         "{observations}"
-        "Para completar la reserva, realizá el pago de la seña siguiendo las instrucciones que te enviamos a continuación. ¡Te esperamos! 🧀"
+        "To complete your reservation, please pay the deposit using the instructions below. We look forward to welcoming you! 🧀"
+    ),
+    TicketDecision.CANCELLED: (
+        "Your reservation *{ticket_id}* has been *cancelled*. "
+        "{observations}"
+        "If you need to book again, send us a message and we'll gladly help you."
+    ),
+    TicketDecision.NO_SHOW: (
+        "Your reservation *{ticket_id}* was marked as *no show* because no attendance was recorded. "
+        "{observations}"
+        "If you believe this is a mistake, contact us and we'll review it."
     ),
     TicketDecision.REJECTED: (
-        "Lo sentimos, tu reserva *{ticket_id}* ha sido *rechazada*. "
+        "We're sorry, your reservation *{ticket_id}* has been *rejected*. "
         "{observations}"
-        "Si tienes alguna pregunta, escríbenos y con gusto te ayudamos."
+        "If you have any questions, send us a message and we'll gladly help you."
     ),
     TicketDecision.EXPIRED: (
-        "Tu reserva *{ticket_id}* ha *expirado* por falta de confirmación. "
+        "Your reservation *{ticket_id}* has *expired* because it was not confirmed in time. "
         "{observations}"
-        "Puedes hacer una nueva reserva cuando lo desees. 😊"
+        "You can make a new reservation whenever you want. 😊"
+    ),
+    TicketDecision.CHECKED_IN: (
+        "We have registered your *check-in* for reservation *{ticket_id}*. "
+        "{observations}"
+        "We hope you enjoy the experience."
     ),
 }
 
@@ -250,6 +265,57 @@ def _build_ticket_message(
     return template.format(ticket_id=ticket_id, observations=obs_text)
 
 
+def _normalize_ticket_status(status_value: str | None) -> str | None:
+    """Normaliza estados del ERP para compararlos sin depender del formato recibido."""
+    if status_value is None:
+        return None
+
+    return status_value.strip().upper().replace("-", "_").replace(" ", "_")
+
+
+def _validate_ticket_status_payload(
+    body: ERPTicketStatusRequest,
+    contact: ContactInfo,
+    ticket: ReservationStatusDetail,
+) -> None:
+    """Valida que el ticket consultado pertenezca al contacto y tenga el estado informado."""
+    if contact.contact_id != body.contact_id:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=(
+                f"El contacto devuelto por el ERP ({contact.contact_id}) no coincide con "
+                f"el contact_id recibido ({body.contact_id})"
+            ),
+        )
+
+    if ticket.ticket_id != body.ticket_id:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=(
+                f"El ticket devuelto por el ERP ({ticket.ticket_id}) no coincide con "
+                f"el ticket_id recibido ({body.ticket_id})"
+            ),
+        )
+
+    ticket_contact_id = ticket.contact.contact_id if ticket.contact else None
+    if ticket_contact_id != body.contact_id:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=f"El ticket {body.ticket_id} no pertenece al contacto {body.contact_id}",
+        )
+
+    ticket_status = _normalize_ticket_status(ticket.status)
+    expected_status = _normalize_ticket_status(body.new_status.value)
+    if ticket_status != expected_status:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=(
+                f"El ticket {body.ticket_id} tiene estado {ticket.status or 'desconocido'} en el ERP "
+                f"y no coincide con el nuevo estado recibido ({body.new_status.value})"
+            ),
+        )
+
+
 def _validate_activity_completed_payload(
     body: ERPSurveyRequest,
     contact: ContactInfo,
@@ -424,6 +490,57 @@ async def trigger_activity_completed_survey(
     )
 
 
+async def _send_payment_instructions(phone: str, ticket_id: str) -> None:
+    """Obtiene las instrucciones de pago del depósito y las envía al cliente por WhatsApp.
+
+    Args:
+        phone: Número de WhatsApp del cliente.
+        ticket_id: Identificador del ticket cuyo depósito se debe pagar.
+    """
+    logger.info("[_send_payment_instructions] phone=%s ticket_id=%s", phone, ticket_id)
+    try:
+        pay_resp = await erp_client.post(
+            f"{ERP_BASE_PATH}.deposit_controller.get_deposit_instructions",
+            json={"ticket_id": ticket_id},
+            timeout=ERP_TIMEOUT,
+        )
+        pay_resp.raise_for_status()
+        pay_data = extract_erp_data(pay_resp.json())
+        pay_info = PaymentInstructions.model_validate(pay_data)
+    except Exception as exc:
+        logger.error(
+            "[_send_payment_instructions] Error al obtener instrucciones de pago ticket=%s: %s",
+            ticket_id,
+            exc,
+        )
+        await notify_error(
+            exc,
+            context=f"_send_payment_instructions | ticket={ticket_id} | phone={phone}",
+        )
+        return
+
+    lines = [
+        "💳 Deposit payment instructions",
+        f"Ticket: {pay_info.ticket_id}",
+        f"Required amount: {pay_info.amount_required} UYU",
+        f"Amount paid: {pay_info.amount_paid or 0} UYU",
+        f"Amount remaining: {pay_info.amount_remaining} UYU",
+    ]
+    if pay_info.instructions:
+        lines.append(f"\n{pay_info.instructions}")
+    lines.append(
+        f"\n📎 Send the payment receipt with the number {ticket_id} "
+        "as the image or document caption."
+    )
+
+    pay_msg = "\n".join(lines)
+    ok = await whatsapp_manager.send_text(user_number=phone, text=pay_msg)
+    if not ok:
+        logger.error(
+            "[_send_payment_instructions] Error enviando instrucciones a %s", phone
+        )
+
+
 # ---------------------------------------------------------------------------
 # Endpoints
 # ---------------------------------------------------------------------------
@@ -511,12 +628,12 @@ async def send_telegram_message(body: ERPSendTelegramRequest) -> dict[str, str]:
 
 @router.post("/ticket-status", summary="Notificar al cliente el estado de su reserva")
 async def notify_ticket_status(body: ERPTicketStatusRequest) -> dict[str, str]:
-    """Informa al cliente por WhatsApp la aprobación, rechazo o expiración de su reserva.
+    """Informa al cliente por WhatsApp cambios relevantes en el estado de su reserva.
 
     Body:
         - contact_id: ID del contacto en el ERP.
         - ticket_id: ID del ticket afectado.
-        - new_status: Nuevo estado (approved | rejected | expired).
+        - new_status: Nuevo estado (confirmed | cancelled | no_show | rejected | expired | checked_in).
         - observations: Texto adicional opcional del operador.
     """
     logger.info(
@@ -533,6 +650,9 @@ async def notify_ticket_status(body: ERPTicketStatusRequest) -> dict[str, str]:
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail=f"El contacto {body.contact_id} no tiene teléfono registrado en el ERP",
         )
+
+    ticket = await _get_reservation_status(body.ticket_id)
+    _validate_ticket_status_payload(body=body, contact=contact, ticket=ticket)
 
     phone = contact.phone
 
@@ -568,55 +688,20 @@ async def notify_ticket_status(body: ERPTicketStatusRequest) -> dict[str, str]:
     return {"status": "ok", "phone": phone}
 
 
-async def _send_payment_instructions(phone: str, ticket_id: str) -> None:
-    """Obtiene las instrucciones de pago del depósito y las envía al cliente por WhatsApp.
+@router.post(
+    "/activity-completed", summary="Enviar encuesta de satisfacción tras actividad"
+)
+async def activity_completed(body: ERPSurveyRequest) -> dict[str, str]:
+    """Notifica que se completó una actividad y envía una encuesta de satisfacción.
 
-    Args:
-        phone: Número de WhatsApp del cliente.
-        ticket_id: Identificador del ticket cuyo depósito se debe pagar.
+    Body:
+        - contact_id: ID del contacto en el ERP.
+        - experience_id: ID de la experiencia completada.
+        - slot_id: ID del slot en que se realizó la actividad.
+        - ticket_id: ID del ticket asociado.
+
     """
-    logger.info("[_send_payment_instructions] phone=%s ticket_id=%s", phone, ticket_id)
-    try:
-        pay_resp = await erp_client.post(
-            f"{ERP_BASE_PATH}.deposit_controller.get_deposit_instructions",
-            json={"ticket_id": ticket_id},
-            timeout=ERP_TIMEOUT,
-        )
-        pay_resp.raise_for_status()
-        pay_data = extract_erp_data(pay_resp.json())
-        pay_info = PaymentInstructions.model_validate(pay_data)
-    except Exception as exc:
-        logger.error(
-            "[_send_payment_instructions] Error al obtener instrucciones de pago ticket=%s: %s",
-            ticket_id,
-            exc,
-        )
-        await notify_error(
-            exc,
-            context=f"_send_payment_instructions | ticket={ticket_id} | phone={phone}",
-        )
-        return
-
-    lines = [
-        "💳 Instrucciones de pago de la seña",
-        f"Ticket: {pay_info.ticket_id}",
-        f"Monto requerido: {pay_info.amount_required} UYU",
-        f"Monto pagado: {pay_info.amount_paid or 0} UYU",
-        f"Monto restante: {pay_info.amount_remaining} UYU",
-    ]
-    if pay_info.instructions:
-        lines.append(f"\n{pay_info.instructions}")
-    lines.append(
-        f"\n📎 Enviá el comprobante de pago con el número {ticket_id} "
-        "como descripción de la imagen o del documento."
-    )
-
-    pay_msg = "\n".join(lines)
-    ok = await whatsapp_manager.send_text(user_number=phone, text=pay_msg)
-    if not ok:
-        logger.error(
-            "[_send_payment_instructions] Error enviando instrucciones a %s", phone
-        )
+    return await trigger_activity_completed_survey(body, channel="whatsapp")
 
 
 # ---------------------------------------------------------------------------
@@ -688,22 +773,6 @@ async def release_telegram_control(body: ERPTelegramControlRequest) -> dict[str,
     logger.info("[release-control/telegram] chat_id=%s", body.chat_id)
     human_control.release_telegram_control(body.chat_id)
     return {"status": "released", "chat_id": body.chat_id}
-
-
-@router.post(
-    "/activity-completed", summary="Enviar encuesta de satisfacción tras actividad"
-)
-async def activity_completed(body: ERPSurveyRequest) -> dict[str, str]:
-    """Notifica que se completó una actividad y envía una encuesta de satisfacción.
-
-    Body:
-        - contact_id: ID del contacto en el ERP.
-        - experience_id: ID de la experiencia completada.
-        - slot_id: ID del slot en que se realizó la actividad.
-        - ticket_id: ID del ticket asociado.
-
-    """
-    return await trigger_activity_completed_survey(body, channel="whatsapp")
 
 
 # ---------------------------------------------------------------------------

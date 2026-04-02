@@ -22,15 +22,15 @@ SCAN_INTERVAL_SECONDS: int = 900  # 15 minutos
 ERP_TIMEOUT_SECONDS: float = 15.0
 
 _REMINDER_MESSAGE: str = (
-    "⏰ *Recordatorio: pago de seña pendiente*\n\n"
-    "Tu reserva *{ticket_id}* fue confirmada por el establecimiento, pero el pago de la seña aún no se ha registrado.\n\n"
-    "💳 Instrucciones de pago de la seña\n"
+    "⏰ *Reminder: pending deposit payment*\n\n"
+    "Your reservation *{ticket_id}* was confirmed by the establishment, but the deposit payment has not been registered yet.\n\n"
+    "💳 Deposit payment instructions\n"
     "Ticket: {ticket_id}\n"
-    "Monto requerido: {amount_required} UYU\n"
-    "Monto pagado: {amount_paid} UYU\n"
-    "Monto restante: {amount_remaining} UYU"
+    "Required amount: {amount_required} UYU\n"
+    "Amount paid: {amount_paid} UYU\n"
+    "Amount remaining: {amount_remaining} UYU"
     "{instructions_block}\n\n"
-    "📎 Enviá el comprobante de pago con el número {ticket_id} como descripción de la imagen o del documento."
+    "📎 Send the payment receipt with the number {ticket_id} as the image or document caption."
 )
 
 

@@ -15,7 +15,6 @@ from chatbot.ai_agent.instructions import (
     resolve_or_create_contact,
 )
 from chatbot.ai_agent.models import ERP_BASE_PATH, GoogleModel, ReservationStatus
-from chatbot.ai_agent.tools.erp_utils import extract_erp_data
 from chatbot.ai_agent.tools.booking import (
     cancel_reservation,
     confirm_modification,
@@ -41,6 +40,7 @@ from chatbot.ai_agent.tools.customer import (
     upsert_lead,
 )
 from chatbot.ai_agent.tools.date_resolver import resolve_relative_date
+from chatbot.ai_agent.tools.erp_utils import extract_erp_data
 from chatbot.ai_agent.tools.notifications import stop_lead_followups
 from chatbot.ai_agent.tools.payments import get_payment_instructions
 from chatbot.ai_agent.tools.support import create_complaint, submit_survey
@@ -172,15 +172,26 @@ def get_cheese_agent() -> Agent[AgentDeps, str]:
         )
 
         @_cheese_agent.instructions
+        def reply_in_user_language_prompt(
+            ctx: RunContext[AgentDeps],
+        ) -> str:
+            return (
+                "Always reply in the same language as the user's most recent message. "
+                "Ignore the language used by this system prompt, tool schemas, tool outputs, "
+                "or ERP data. If any tool returns content in a different language, translate "
+                "or adapt it before answering. If the user writes in Spanish, use Rioplatense Spanish."
+            )
+
+        @_cheese_agent.instructions
         def current_datetime_prompt(
             ctx: RunContext[AgentDeps],
         ) -> str:
             now = datetime.now(tz=timezone.utc).astimezone()
             return (
-                f"Fecha y hora actual: {now.strftime('%A %d de %B de %Y, %H:%M')} "
-                f"(zona horaria del servidor: {now.strftime('%Z %z')}). "
-                "Usa esta fecha para resolver expresiones como mañana, la semana que viene, "
-                "el mes que viene, dentro de N días, etc."
+                f"Current date and time: {now.strftime('%A %d %B %Y, %H:%M')} "
+                f"(server timezone: {now.strftime('%Z %z')}). "
+                "Use this date to resolve expressions such as tomorrow, next week, next month, "
+                "or in N days."
             )
 
         @_cheese_agent.instructions

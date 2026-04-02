@@ -142,7 +142,7 @@ def _to_json_block(data: Any) -> str:
 
 def _truncate(text: str) -> str:
     if len(text) > _MAX_MSG_LEN:
-        return text[: _MAX_MSG_LEN - 30] + "\n...(respuesta truncada)"
+        return text[: _MAX_MSG_LEN - 30] + "\n...(truncated response)"
     return text
 
 
@@ -175,7 +175,7 @@ async def _resolve(ctx: RunContext[AgentDeps]) -> str | None:
             ctx.deps.telegram_id,
             exc,
         )
-        return f"No se pudo resolver tu contacto en el ERP: {exc}"
+        return f"Your contact could not be resolved in the ERP: {exc}"
 
 
 async def _send_error(
@@ -193,7 +193,7 @@ async def _send_error(
     await notify_error(exc, context=f"telegram_cmd | {context_str}")
     if update.message:
         await update.message.reply_text(
-            f"⚠️ Error al ejecutar el comando: `{exc}`",
+            f"⚠️ Error while running the command: `{exc}`",
             parse_mode="Markdown",
         )
 
@@ -225,18 +225,14 @@ async def cmd_list_experiences(
         return
 
     if not experiences:
-        await update.message.reply_text(
-            "No se encontraron experiencias con esos filtros."
-        )
+        await update.message.reply_text("No experiences were found with those filters.")
         return
 
-    lines = [f"🧀 *Experiencias* ({len(experiences)} resultados)\n"]
+    lines = [f"🧀 *Experiences* ({len(experiences)} results)\n"]
     for exp in experiences:
         lines.append(f"• `{exp.experience_id}` — {_escape_md(exp.name)}")
 
-    lines.append(
-        "\nUsa `/get_experience_detail <id>` para ver el detalle de una experiencia."
-    )
+    lines.append("\nUse `/get_experience_detail <id>` to view an experience in detail.")
     await update.message.reply_text(_truncate("\n".join(lines)), parse_mode="Markdown")
 
 
@@ -256,8 +252,8 @@ async def cmd_get_experience_detail(
 
     if not args:
         await update.message.reply_text(
-            "Uso: `/get_experience_detail <id>`\n"
-            "Tip: obtén el id con `/list_experiences`.",
+            "Usage: `/get_experience_detail <id>`\n"
+            "Tip: get the id with `/list_experiences`.",
             parse_mode="Markdown",
         )
         return
@@ -292,14 +288,14 @@ async def cmd_list_routes(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         return
 
     if not routes:
-        await update.message.reply_text("No se encontraron rutas.")
+        await update.message.reply_text("No routes were found.")
         return
 
-    lines = [f"🗺️ *Rutas* ({len(routes)} resultados)\n"]
+    lines = [f"🗺️ *Routes* ({len(routes)} results)\n"]
     for route in routes:
         lines.append(f"• `{route.route_id}` — {_escape_md(route.name)}")
 
-    lines.append("\nUsa `/get_route_detail <id>` para ver el detalle de una ruta.")
+    lines.append("\nUse `/get_route_detail <id>` to view a route in detail.")
     await update.message.reply_text(_truncate("\n".join(lines)), parse_mode="Markdown")
 
 
@@ -319,7 +315,7 @@ async def cmd_get_route_detail(
 
     if not args:
         await update.message.reply_text(
-            "Uso: `/get_route_detail <id>`\nTip: obtén el id con `/list_routes`.",
+            "Usage: `/get_route_detail <id>`\nTip: get the id with `/list_routes`.",
             parse_mode="Markdown",
         )
         return
@@ -356,14 +352,14 @@ async def cmd_list_establishments(
         return
 
     if not establishments:
-        await update.message.reply_text("No se encontraron establecimientos.")
+        await update.message.reply_text("No establishments were found.")
         return
 
-    lines = [f"🏠 *Establecimientos* ({len(establishments)} resultados)\n"]
+    lines = [f"🏠 *Establishments* ({len(establishments)} results)\n"]
     for est in establishments:
         lines.append(f"• `{est.establishment_id}` — {_escape_md(est.name)}")
 
-    lines.append("\nUsa `/get_establishment_details <id>` para ver el detalle.")
+    lines.append("\nUse `/get_establishment_details <id>` to view the details.")
     await update.message.reply_text(_truncate("\n".join(lines)), parse_mode="Markdown")
 
 
@@ -383,7 +379,7 @@ async def cmd_get_establishment_details(
 
     if not args:
         await update.message.reply_text(
-            "Uso: `/get_establishment_details <id>`\nTip: obtén el id con `/list_establishments`.",
+            "Usage: `/get_establishment_details <id>`\nTip: get the id with `/list_establishments`.",
             parse_mode="Markdown",
         )
         return
@@ -416,8 +412,8 @@ async def cmd_get_availability(
 
     if len(args) < 3:  # noqa: PLR2004
         await update.message.reply_text(
-            "Uso: `/get_availability <experience_id> <date_from> <date_to>`\n"
-            "Ejemplo: `/get_availability exp-001 01-03-2026 31-12-2026`",
+            "Usage: `/get_availability <experience_id> <date_from> <date_to>`\n"
+            "Example: `/get_availability exp-001 01-03-2026 31-12-2026`",
             parse_mode="Markdown",
         )
         return
@@ -458,8 +454,8 @@ async def cmd_get_route_availability(
 
     if len(args) < 3:  # noqa: PLR2004
         await update.message.reply_text(
-            "Uso: `/get_route_availability <route_id> <fecha> <personas>`\n"
-            "Ejemplo: `/get_route_availability ruta-campo 2026-04-15 4`",
+            "Usage: `/get_route_availability <route_id> <date> <party_size>`\n"
+            "Example: `/get_route_availability ruta-campo 2026-04-15 4`",
             parse_mode="Markdown",
         )
         return
@@ -472,7 +468,7 @@ async def cmd_get_route_availability(
         party_size = int(party_str)
     except ValueError:
         await update.message.reply_text(
-            f"❌ `{party_str}` no es un número válido de personas.",
+            f"❌ `{party_str}` is not a valid party size.",
             parse_mode="Markdown",
         )
         return
@@ -514,11 +510,11 @@ async def cmd_resolve_or_create_contact(
 
     deps = ctx.deps
     lines = [
-        "👤 *Tu contacto en el ERP*\n",
+        "👤 *Your ERP contact*\n",
         f"• *ID:* `{deps.contact_id}`",
-        f"• *Nombre:* {deps.user_name or '_no registrado_'}",
-        f"• *Email:* {deps.user_email or '_no registrado_'}",
-        f"• *Teléfono:* {deps.user_phone or '_no registrado_'}",
+        f"• *Name:* {deps.user_name or '_not registered_'}",
+        f"• *Email:* {deps.user_email or '_not registered_'}",
+        f"• *Phone:* {deps.user_phone or '_not registered_'}",
         f"• *Telegram ID:* {deps.telegram_id}",
     ]
     await update.message.reply_text("\n".join(lines), parse_mode="Markdown")
@@ -540,8 +536,8 @@ async def cmd_update_contact(
 
     if not args:
         await update.message.reply_text(
-            "Uso: `/update_contact [nombre=X] [email=X]`\n"
-            "Ejemplo: `/update_contact nombre=Ana email=ana@test.com`",
+            "Usage: `/update_contact [nombre=X] [email=X]`\n"
+            "Example: `/update_contact nombre=Ana email=ana@test.com`",
             parse_mode="Markdown",
         )
         return
@@ -552,7 +548,7 @@ async def cmd_update_contact(
 
     if not any([name, email]):
         await update.message.reply_text(
-            "❌ No se detectaron campos válidos. Usa `nombre=X` o `email=X`.",
+            "❌ No valid fields were detected. Use `nombre=X` or `email=X`.",
             parse_mode="Markdown",
         )
         return
@@ -616,8 +612,8 @@ async def cmd_get_reservation_status(
 
     if not args:
         await update.message.reply_text(
-            "Uso: `/get_reservation_status <ticket_id>`\n"
-            "Ejemplo: `/get_reservation_status TKT-2026-03-00018`",
+            "Usage: `/get_reservation_status <ticket_id>`\n"
+            "Example: `/get_reservation_status TKT-2026-03-00018`",
             parse_mode="Markdown",
         )
         return
@@ -651,7 +647,7 @@ async def cmd_get_reservations(
     valid_statuses = {"PENDING", "CONFIRMED", "CANCELLED", "EXPIRED"}
     if status and status not in valid_statuses:
         await update.message.reply_text(
-            f"❌ Estado inválido `{status}`. Valores permitidos: {', '.join(sorted(valid_statuses))}",
+            f"❌ Invalid status `{status}`. Allowed values: {', '.join(sorted(valid_statuses))}",
             parse_mode="Markdown",
         )
         return
@@ -659,7 +655,7 @@ async def cmd_get_reservations(
     ctx = _build_ctx(chat_id)
     if not ctx.deps.user_phone:
         await update.message.reply_text(
-            "⚠️ No tienes un teléfono registrado. Usa `/change_phone` o escríbeme tu número primero.",
+            "⚠️ You do not have a registered phone number. Use `/change_phone` or send me your number first.",
             parse_mode="Markdown",
         )
         return
@@ -671,13 +667,13 @@ async def cmd_get_reservations(
         return
 
     if not result.tickets:
-        msg = "No se encontraron reservas"
+        msg = "No reservations were found"
         if status:
-            msg += f" con estado `{status}`"
+            msg += f" with status `{status}`"
         await update.message.reply_text(msg + ".", parse_mode="Markdown")
         return
 
-    lines = [f"🎟️ <b>Reservas</b> ({result.total} en total)\n"]
+    lines = [f"🎟️ <b>Reservations</b> ({result.total} total)\n"]
     for ticket in result.tickets:
         exp = html.escape(ticket.experience_name or ticket.experience or "")
         lines.append(
@@ -685,8 +681,8 @@ async def cmd_get_reservations(
         )
     if result.total and result.total > len(result.tickets):
         lines.append(
-            f"\n<i>Mostrando {len(result.tickets)} de {result.total}. "
-            "Usa /get_reservations con filtro de estado para ver más.</i>"
+            f"\n<i>Showing {len(result.tickets)} of {result.total}. "
+            "Use /get_reservations with a status filter to see more.</i>"
         )
     await update.message.reply_text(_truncate("\n".join(lines)), parse_mode="HTML")
 
@@ -707,8 +703,8 @@ async def cmd_get_route_booking_status(
 
     if not args:
         await update.message.reply_text(
-            "Uso: `/get_route_booking_status <route_booking_id>`\n"
-            "Ejemplo: `/get_route_booking_status RB-2026-03-00013`",
+            "Usage: `/get_route_booking_status <route_booking_id>`\n"
+            "Example: `/get_route_booking_status RB-2026-03-00013`",
             parse_mode="Markdown",
         )
         return
@@ -768,9 +764,9 @@ async def cmd_cancel_reservation(
 
     if not args:
         await update.message.reply_text(
-            "Uso: `/cancel_reservation <ticket_id>`\n"
-            "Ejemplo: `/cancel_reservation TKT-2026-03-00018`\n"
-            "⚠️ Esta acción es irreversible.",
+            "Usage: `/cancel_reservation <ticket_id>`\n"
+            "Example: `/cancel_reservation TKT-2026-03-00018`\n"
+            "⚠️ This action is irreversible.",
             parse_mode="Markdown",
         )
         return
@@ -801,8 +797,8 @@ async def cmd_activity_completed(
     args: list[str] = context.args or []
     if len(args) != 4:  # noqa: PLR2004
         await update.message.reply_text(
-            "Uso: `/activity_completed <contact_id> <experience_id> <slot_id> <ticket_id>`\n"
-            "Ejemplo: `/activity_completed CNT-001 EXP-001 SLOT-001 TKT-2026-03-00018`",
+            "Usage: `/activity_completed <contact_id> <experience_id> <slot_id> <ticket_id>`\n"
+            "Example: `/activity_completed CNT-001 EXP-001 SLOT-001 TKT-2026-03-00018`",
             parse_mode="Markdown",
         )
         return
@@ -852,8 +848,8 @@ async def cmd_list_available_experiences(
 
     if len(args) < 2:  # noqa: PLR2004
         await update.message.reply_text(
-            "Uso: `/list_available_experiences <date_from> <date_to>`\n"
-            "Ejemplo: `/list_available_experiences 01-04-2026 30-04-2026`",
+            "Usage: `/list_available_experiences <date_from> <date_to>`\n"
+            "Example: `/list_available_experiences 01-04-2026 30-04-2026`",
             parse_mode="Markdown",
         )
         return
@@ -874,11 +870,11 @@ async def cmd_list_available_experiences(
 
     if not availabilities:
         await update.message.reply_text(
-            f"No hay experiencias disponibles entre {date_from} y {date_to}."
+            f"There are no available experiences between {date_from} and {date_to}."
         )
         return
 
-    lines = [f"📅 *Disponibilidad* ({len(availabilities)} experiencias)\n"]
+    lines = [f"📅 *Availability* ({len(availabilities)} experiences)\n"]
     for av in availabilities:
         slot_count = len(av.slots) if av.slots else 0
         lines.append(
@@ -886,7 +882,7 @@ async def cmd_list_available_experiences(
         )
 
     lines.append(
-        "\nUsa `/get_availability <experience_id> <date_from> <date_to>` para ver los slots en detalle."
+        "\nUse `/get_availability <experience_id> <date_from> <date_to>` to see the slots in detail."
     )
     await update.message.reply_text(_truncate("\n".join(lines)), parse_mode="Markdown")
 

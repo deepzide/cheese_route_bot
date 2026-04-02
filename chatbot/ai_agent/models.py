@@ -16,7 +16,7 @@ from datetime import datetime
 from enum import StrEnum
 from typing import Any
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 # ---------------------------------------------------------------------------
 # ERP API path constants
@@ -1006,11 +1006,14 @@ class PaymentReceipt(BaseModel):
 
 
 class TicketDecision(StrEnum):
-    """Possible outcomes for a pending reservation ticket."""
+    """Ticket statuses that can trigger a customer notification webhook."""
 
     APPROVED = "CONFIRMED"
+    CANCELLED = "CANCELLED"
+    NO_SHOW = "NO_SHOW"
     REJECTED = "REJECTED"
     EXPIRED = "EXPIRED"
+    CHECKED_IN = "CHECKED_IN"
 
 
 class ERPSendMessageRequest(BaseModel):
@@ -1039,14 +1042,26 @@ class ERPSendTelegramRequest(BaseModel):
 class ERPTicketStatusRequest(BaseModel):
     """Body for /erp/ticket-status endpoint.
 
-    The ERP sends this when a pending reservation is approved, rejected, or
-    has expired, so the bot can notify the customer via WhatsApp.
+    The ERP sends this when a reservation changes to a notifiable status so the
+    bot can validate ownership and notify the customer via WhatsApp.
     """
 
     contact_id: str
     ticket_id: str
     new_status: TicketDecision
     observations: str | None = None
+
+    @field_validator("new_status", mode="before")
+    @classmethod
+    def normalize_new_status(cls, value: Any) -> Any:
+        """Normalize incoming ERP status names such as Checked-In or No-Show."""
+        if not isinstance(value, str):
+            return value
+
+        normalized = value.strip().upper().replace("-", "_").replace(" ", "_")
+        if normalized == "APPROVED":
+            return TicketDecision.APPROVED.value
+        return normalized
 
 
 class ERPSurveyRequest(BaseModel):

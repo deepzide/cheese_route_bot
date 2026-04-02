@@ -32,9 +32,9 @@ _AMOUNT_RE = re.compile(r"[\d]+(?:[.,]\d+)?")
 
 # ERP VALIDATION_ERROR messages that are caused by business rules (not bugs)
 _ERP_VALIDATION_MESSAGES: dict[str, str] = {
-    "cannot exceed": "El monto del comprobante supera el monto requerido para el depósito.",
-    "PAID deposit": "El depósito ya fue pagado completamente.",
-    "already paid": "El depósito ya fue pagado completamente.",
+    "cannot exceed": "The receipt amount exceeds the amount required for the deposit.",
+    "PAID deposit": "The deposit has already been paid in full.",
+    "already paid": "The deposit has already been paid in full.",
 }
 
 _RECEIPT_CONTENT_TYPES: dict[str, str] = {
@@ -255,8 +255,8 @@ async def validate_ticket_ownership(
             if reservation.reservation_id.upper() == ticket_id.upper():
                 if reservation.status.lower() != "confirmed":
                     raise ValueError(
-                        f"El ticket {ticket_id} no está en estado CONFIRMADO "
-                        f"(estado actual: {reservation.status})."
+                        f"Ticket {ticket_id} is not in CONFIRMED status "
+                        f"(current status: {reservation.status})."
                     )
                 logger.info(
                     "[validate_ticket_ownership] ticket %s validated for user %s",
@@ -265,7 +265,9 @@ async def validate_ticket_ownership(
                 )
                 return
 
-    raise ValueError(f"El ticket {ticket_id} no pertenece al número {user_phone}.")
+    raise ValueError(
+        f"Ticket {ticket_id} does not belong to phone number {user_phone}."
+    )
 
 
 async def get_payment_instructions(

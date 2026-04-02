@@ -57,7 +57,7 @@ load_dotenv()
 router = APIRouter()
 ERROR_STATUS = {"status": "error"}
 OK_STATUS = {"status": "ok"}
-USER_ERROR_MSG = "Ocurrio un error al procesar tu mensaje. Por favor intentalo de nuevo o escribe /restart para reiniciar el chat."
+USER_ERROR_MSG = "An error occurred while processing your message. Please try again or send /restart to restart the chat."
 erp_client: httpx.AsyncClient = build_erp_client()
 
 # Excepciones que indican un fallo transitorio del proveedor de IA y ameritan reintento
@@ -158,8 +158,8 @@ async def _store_pending_file(
     await whatsapp_manager.send_text(
         user_number=user_number,
         text=(
-            "Recibí tu comprobante de pago. 🧾\n"
-            "Por favor envíame el número de ticket (ej: TKT-2026-03-00018) para registrar el pago:"
+            "I received your payment receipt. 🧾\n"
+            "Please send me the ticket number (for example: TKT-2026-03-00018) so I can register the payment:"
         ),
         message_id=message_id,
     )
@@ -189,8 +189,8 @@ async def _register_and_notify_payment(
         await whatsapp_manager.send_text(
             user_number=user_number,
             text=(
-                "No se pudo procesar el comprobante. "
-                "Por favor verifica el archivo e inténtalo de nuevo."
+                "The receipt could not be processed. "
+                "Please check the file and try again."
             ),
             message_id=message_id,
         )
@@ -220,8 +220,8 @@ async def _register_and_notify_payment(
         await whatsapp_manager.send_text(
             user_number=user_number,
             text=(
-                "No se pudo determinar el monto del comprobante. "
-                "Por favor verifica el archivo e inténtalo de nuevo."
+                "The receipt amount could not be determined. "
+                "Please check the file and try again."
             ),
             message_id=message_id,
         )
@@ -285,8 +285,8 @@ async def _register_and_notify_payment(
         await whatsapp_manager.send_text(
             user_number=user_number,
             text=(
-                "Ocurrió un error al registrar tu pago en el sistema. "
-                "Por favor inténtalo de nuevo o escala tu solicitud a un humano."
+                "An error occurred while registering your payment in the system. "
+                "Please try again or escalate your request to a human agent."
             ),
             message_id=message_id,
         )
@@ -306,8 +306,8 @@ async def _register_and_notify_payment(
         await whatsapp_manager.send_text(
             user_number=user_number,
             text=(
-                "Ocurrió un error al registrar tu pago en el sistema. "
-                "Por favor inténtalo de nuevo o escala tu solicitud a un humano."
+                "An error occurred while registering your payment in the system. "
+                "Please try again or escalate your request to a human agent."
             ),
             message_id=message_id,
         )
@@ -324,10 +324,10 @@ async def _register_and_notify_payment(
     )
     if result.is_complete:
         msg = (
-            f"✅ ¡Seña pagada completamente!\n"
-            f"Depósito: {result.deposit_id}\n"
+            f"✅ Deposit fully paid!\n"
+            f"Deposit: {result.deposit_id}\n"
             f"Ticket: {result.ticket_id}\n"
-            f"Total pagado: {result.total_amount_paid} UYU"
+            f"Total paid: {result.total_amount_paid} UYU"
         )
         await whatsapp_manager.send_text(
             user_number=user_number, text=msg, message_id=message_id
@@ -338,10 +338,10 @@ async def _register_and_notify_payment(
         )
     else:
         msg = (
-            f"✅ Pago registrado exitosamente.\n"
-            f"Depósito: {result.deposit_id}\n"
-            f"Monto pagado: {result.amount_paid} UYU\n"
-            f"Monto restante: {result.amount_remaining} UYU"
+            f"✅ Payment registered successfully.\n"
+            f"Deposit: {result.deposit_id}\n"
+            f"Amount paid: {result.amount_paid} UYU\n"
+            f"Amount remaining: {result.amount_remaining} UYU"
         )
         await whatsapp_manager.send_text(
             user_number=user_number, text=msg, message_id=message_id
@@ -401,8 +401,8 @@ async def _handle_pending_survey_response(
             ),
         )
         error_message = (
-            "Gracias por tu opinión. Tuvimos un problema al registrarla en el sistema, "
-            "pero ya avisamos al equipo para revisarlo."
+            "Thanks for your feedback. We had a problem saving it in the system, "
+            "but we've already notified the team to review it."
         )
         await message_handler.save_assistant_msg(user_number, error_message, [])
         await whatsapp_manager.send_text(
@@ -414,8 +414,8 @@ async def _handle_pending_survey_response(
 
     clear_pending_survey(user_number)
     thanks_message = (
-        f"Gracias por tu opinión. Registramos tu valoración de {result.rating}/5"
-        f" para el ticket {result.ticket_id}."
+        f"Thanks for your feedback. We recorded your rating of {result.rating}/5"
+        f" for ticket {result.ticket_id}."
     )
     await message_handler.save_assistant_msg(user_number, thanks_message, [])
     await whatsapp_manager.send_text(
@@ -478,16 +478,16 @@ async def _process_message(message: Message) -> None:
                 _pending_receipt.pop(user_number, None)
                 await whatsapp_manager.send_text(
                     user_number=user_number,
-                    text="Registro de pago cancelado. ¿En qué más te puedo ayudar?",
+                    text="Payment registration cancelled. What else can I help you with?",
                     message_id=message_id,
                 )
             else:
                 await whatsapp_manager.send_text(
                     user_number=user_number,
                     text=(
-                        "No encontré un número de ticket en tu mensaje. "
-                        "Por favor envíame el número de ticket (ej: TKT-2026-03-00018) "
-                        "o escribe /cancelar para cancelar el registro del pago:"
+                        "I couldn't find a ticket number in your message. "
+                        "Please send the ticket number (for example: TKT-2026-03-00018) "
+                        "or send /cancelar to cancel the payment registration:"
                     ),
                     message_id=message_id,
                 )
@@ -508,7 +508,7 @@ async def _process_message(message: Message) -> None:
             logger.info("'/restart' requested by %s", user_number)
             await services.reset_chat(user_number)
             await whatsapp_manager.send_text(
-                user_number=user_number, text="Chat reiniciado", message_id=message_id
+                user_number=user_number, text="Chat restarted", message_id=message_id
             )
             return
 
@@ -727,8 +727,8 @@ async def _process_image_receipt(
         await whatsapp_manager.send_text(
             user_number=user_number,
             text=(
-                "No se pudo determinar el monto del comprobante. "
-                "Por favor verifica la imagen e inténtalo de nuevo."
+                "The receipt amount could not be determined. "
+                "Please check the image and try again."
             ),
             message_id=message_id,
         )
@@ -792,8 +792,8 @@ async def _process_image_receipt(
         await whatsapp_manager.send_text(
             user_number=user_number,
             text=(
-                "Ocurrió un error al registrar tu pago en el sistema. "
-                "Por favor inténtalo de nuevo o escala tu solicitud a un humano."
+                "An error occurred while registering your payment in the system. "
+                "Please try again or escalate your request to a human agent."
             ),
             message_id=message_id,
         )
@@ -813,8 +813,8 @@ async def _process_image_receipt(
         await whatsapp_manager.send_text(
             user_number=user_number,
             text=(
-                "Ocurrió un error al registrar tu pago en el sistema. "
-                "Por favor inténtalo de nuevo o escala tu solicitud a un humano."
+                "An error occurred while registering your payment in the system. "
+                "Please try again or escalate your request to a human agent."
             ),
             message_id=message_id,
         )
@@ -831,10 +831,10 @@ async def _process_image_receipt(
     )
     if result.is_complete:
         msg = (
-            f"✅ ¡Seña pagada completamente!\n"
-            f"Depósito: {result.deposit_id}\n"
+            f"✅ Deposit fully paid!\n"
+            f"Deposit: {result.deposit_id}\n"
             f"Ticket: {result.ticket_id}\n"
-            f"Total pagado: {result.total_amount_paid} UYU"
+            f"Total paid: {result.total_amount_paid} UYU"
         )
         await whatsapp_manager.send_text(
             user_number=user_number, text=msg, message_id=message_id
@@ -842,10 +842,10 @@ async def _process_image_receipt(
         await _fetch_and_send_qr(user_number=user_number, ticket_id=ticket_id)
     else:
         msg = (
-            f"✅ Pago registrado exitosamente.\n"
-            f"Depósito: {result.deposit_id}\n"
-            f"Monto pagado: {result.amount_paid} UYU\n"
-            f"Monto restante: {result.amount_remaining} UYU"
+            f"✅ Payment registered successfully.\n"
+            f"Deposit: {result.deposit_id}\n"
+            f"Amount paid: {result.amount_paid} UYU\n"
+            f"Amount remaining: {result.amount_remaining} UYU"
         )
         await whatsapp_manager.send_text(
             user_number=user_number, text=msg, message_id=message_id

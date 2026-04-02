@@ -191,7 +191,7 @@ async def _complete_payment(
             "[ocr] OCR failed for telegram_id=%s file=%s: %s", chat_id, file_path, exc
         )
         await message.reply_text(
-            "No se pudo procesar el comprobante. Por favor inténtalo de nuevo.",
+            "The receipt could not be processed. Please try again.",
             do_quote=True,
         )
         return
@@ -218,8 +218,8 @@ async def _complete_payment(
             receipt.amount,
         )
         await message.reply_text(
-            "No se pudo determinar el monto del comprobante. "
-            "Por favor verifica el archivo e inténtalo de nuevo.",
+            "The receipt amount could not be determined. "
+            "Please check the file and try again.",
             do_quote=True,
         )
         return
@@ -275,17 +275,17 @@ async def _complete_payment(
     )
     if result.is_complete:
         reply = (
-            f"✅ Pago registrado exitosamente.\n"
-            f"Depósito: {result.deposit_id}\n"
-            f"Monto pagado: {result.amount_paid}\n"
-            f"Estado: Pago completado."
+            f"✅ Payment registered successfully.\n"
+            f"Deposit: {result.deposit_id}\n"
+            f"Amount paid: {result.amount_paid}\n"
+            f"Status: Payment completed."
         )
     else:
         reply = (
-            f"✅ Pago registrado exitosamente.\n"
-            f"Depósito: {result.deposit_id}\n"
-            f"Monto pagado: {result.amount_paid}\n"
-            f"Monto restante: {result.amount_remaining}"
+            f"✅ Payment registered successfully.\n"
+            f"Deposit: {result.deposit_id}\n"
+            f"Amount paid: {result.amount_paid}\n"
+            f"Amount remaining: {result.amount_remaining}"
         )
     await message.reply_text(reply, do_quote=True)
 
@@ -344,8 +344,8 @@ async def _handle_pending_survey_response(
             ),
         )
         error_message = (
-            "Gracias por tu opinión. Tuvimos un problema al registrarla en el sistema, "
-            "pero ya avisamos al equipo para revisarlo."
+            "Thanks for your feedback. We had a problem saving it in the system, "
+            "but we've already notified the team to review it."
         )
         await message_handler.save_assistant_msg(chat_id, error_message, [])
         await message.reply_text(error_message, do_quote=True)
@@ -353,8 +353,8 @@ async def _handle_pending_survey_response(
 
     clear_pending_survey(chat_id)
     thanks_message = (
-        f"Gracias por tu opinión. Registramos tu valoración de {result.rating}/5"
-        f" para el ticket {result.ticket_id}."
+        f"Thanks for your feedback. We recorded your rating of {result.rating}/5"
+        f" for ticket {result.ticket_id}."
     )
     await message_handler.save_assistant_msg(chat_id, thanks_message, [])
     await message.reply_text(thanks_message, do_quote=True)
@@ -382,15 +382,15 @@ async def _handle_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     if chat_id not in _user_phones:
         _pending_phone.add(chat_id)
         await update.message.reply_text(
-            f"¡Hola{', ' + user.first_name if user else ''}! 🧀\n"
-            "Soy el asistente de Ruta del Queso.\n\n"
-            "Antes de comenzar necesito tu número de teléfono (con código de país, ej: +59899000000):",
+            f"Hello{', ' + user.first_name if user else ''}! 🧀\n"
+            "I'm the Ruta del Queso assistant.\n\n"
+            "Before we begin, I need your phone number (including country code, for example: +59899000000):",
             do_quote=True,
         )
     else:
         await update.message.reply_text(
-            f"¡Hola{', ' + user.first_name if user else ''}! 🧀\n"
-            "Soy el asistente de Ruta del Queso. ¿En qué te puedo ayudar hoy?",
+            f"Hello{', ' + user.first_name if user else ''}! 🧀\n"
+            "I'm the Ruta del Queso assistant. How can I help you today?",
             do_quote=True,
         )
 
@@ -404,7 +404,7 @@ async def _handle_change_phone(
     chat_id = str(update.effective_chat.id)
     _pending_phone.add(chat_id)
     await update.message.reply_text(
-        "Por favor ingresa tu nuevo número de teléfono (con código de país, ej: +59899000000):",
+        "Please enter your new phone number (including country code, for example: +59899000000):",
         do_quote=True,
     )
     logger.info("'/change_phone' requested by telegram_id=%s", chat_id)
@@ -417,7 +417,7 @@ async def _handle_restart(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     chat_id = str(update.effective_chat.id)
     await services.reset_chat(chat_id)
     await update.message.reply_text(
-        "Chat reiniciado. ¿En qué te puedo ayudar?", do_quote=True
+        "Chat restarted. How can I help you?", do_quote=True
     )
     logger.info("'/restart' requested by telegram_id=%s", chat_id)
 
@@ -466,8 +466,8 @@ async def _handle_image(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
                 chat_id,
             )
             await update.message.reply_text(
-                "Recibí tu comprobante de pago. 🧾\n"
-                "Por favor envíame el número de ticket (ej: TKT-2026-03-00018) para registrar el pago:",
+                "I received your payment receipt. 🧾\n"
+                "Please send me the ticket number (for example: TKT-2026-03-00018) so I can register the payment:",
                 do_quote=True,
             )
             return
@@ -494,7 +494,7 @@ async def _handle_image(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
             context=f"telegram_bot._handle_image | chat_id={chat_id}",
         )
         await update.message.reply_text(
-            "Ocurrió un error al registrar el pago. Por favor inténtalo de nuevo.",
+            "An error occurred while registering the payment. Please try again.",
             do_quote=True,
         )
 
@@ -538,8 +538,8 @@ async def _handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE) -
                 chat_id,
             )
             await update.message.reply_text(
-                "Recibí tu comprobante de pago. 🧾\n"
-                "Por favor envíame el número de ticket (ej: TKT-2026-03-00018) para registrar el pago:",
+                "I received your payment receipt. 🧾\n"
+                "Please send me the ticket number (for example: TKT-2026-03-00018) so I can register the payment:",
                 do_quote=True,
             )
             return
@@ -566,7 +566,7 @@ async def _handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE) -
             context=f"telegram_bot._handle_document | chat_id={chat_id}",
         )
         await update.message.reply_text(
-            "Ocurrió un error al registrar el pago. Por favor inténtalo de nuevo.",
+            "An error occurred while registering the payment. Please try again.",
             do_quote=True,
         )
 
@@ -593,7 +593,7 @@ async def _handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             _pending_phone.discard(chat_id)
             logger.info("Phone registered for telegram_id=%s: %s", chat_id, phone)
             await update.message.reply_text(
-                f"¡Perfecto! Tu número {phone} fue registrado. ¿En qué te puedo ayudar hoy? 🧀",
+                f"Perfect! Your number {phone} has been registered. How can I help you today? 🧀",
                 do_quote=True,
             )
             return
@@ -602,8 +602,8 @@ async def _handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             # First interaction — ask for phone before anything else
             _pending_phone.add(chat_id)
             await update.message.reply_text(
-                "Antes de continuar necesito tu número de teléfono "
-                "(con código de país, ej: +59899000000):",
+                "Before we continue, I need your phone number "
+                "(including country code, for example: +59899000000):",
                 do_quote=True,
             )
             return
@@ -646,14 +646,14 @@ async def _handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
                 if incoming_msg.strip().lower() in {"/cancelar", "/cancel", "/restart"}:
                     _pending_receipt.pop(chat_id, None)
                     await update.message.reply_text(
-                        "Registro de pago cancelado. ¿En qué más te puedo ayudar?",
+                        "Payment registration cancelled. What else can I help you with?",
                         do_quote=True,
                     )
                 else:
                     await update.message.reply_text(
-                        "No encontré un número de ticket en tu mensaje. "
-                        "Por favor envíame el número de ticket (ej: TKT-2026-03-00018) "
-                        "o escribe /cancelar para cancelar el registro del pago:",
+                        "I couldn't find a ticket number in your message. "
+                        "Please send the ticket number (for example: TKT-2026-03-00018) "
+                        "or type /cancelar to cancel the payment registration:",
                         do_quote=True,
                     )
             return
@@ -751,8 +751,8 @@ async def _handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
                     except Exception as explainer_exc:
                         logger.error("Error agent also failed: %s", explainer_exc)
                         ai_response = (
-                            "Ocurrió un error al procesar tu mensaje. "
-                            "Por favor inténtalo de nuevo o escribe /restart."
+                            "An error occurred while processing your message. "
+                            "Please try again or type /restart."
                         )
                     tools_used = []
             except Exception as agent_exc:
@@ -772,8 +772,8 @@ async def _handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
                 except Exception as explainer_exc:
                     logger.error("Error agent also failed: %s", explainer_exc)
                     ai_response = (
-                        "Ocurrió un error al procesar tu mensaje. "
-                        "Por favor inténtalo de nuevo o escribe /restart."
+                        "An error occurred while processing your message. "
+                        "Please try again or type /restart."
                     )
                 tools_used = []
 
@@ -807,8 +807,8 @@ async def _handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             context=f"telegram_bot._handle_message | chat_id={chat_id} | msg={incoming_msg[:80]}",
         )
         await update.message.reply_text(
-            "Ocurrió un error al procesar tu mensaje. "
-            "Por favor inténtalo de nuevo o escribe /restart para reiniciar el chat.",
+            "An error occurred while processing your message. "
+            "Please try again or type /restart to restart the chat.",
             do_quote=True,
         )
 

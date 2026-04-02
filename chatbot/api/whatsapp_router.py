@@ -2,6 +2,7 @@ import asyncio
 import logging
 import time
 import traceback
+from dataclasses import dataclass
 from datetime import datetime
 
 import httpx
@@ -17,6 +18,10 @@ from chatbot.ai_agent.context import webhook_context_manager
 from chatbot.ai_agent.dependencies import AgentDeps
 from chatbot.ai_agent.error_agent import run_error_agent
 from chatbot.ai_agent.summary_agent import summarize_conversation
+from chatbot.ai_agent.tools.ocr import (
+    extract_payment_receipt,
+    extract_payment_receipt_from_pdf,
+)
 from chatbot.ai_agent.tools.payments import (
     erp_validation_user_message,
     parse_amount,
@@ -26,7 +31,11 @@ from chatbot.ai_agent.tools.payments import (
 from chatbot.api.utils import message_handler
 from chatbot.api.utils.message_queue import Message, message_queue
 from chatbot.api.utils.text import strip_markdown
-from chatbot.api.utils.webhook_parser import ParsedMessage, extract_message_content
+from chatbot.api.utils.webhook_parser import (
+    _TICKET_ID_RE,
+    ParsedMessage,
+    extract_message_content,
+)
 from chatbot.core import human_control
 from chatbot.core.config import config
 from chatbot.db.services import services
@@ -45,6 +54,17 @@ erp_client: httpx.AsyncClient = build_erp_client()
 
 # Excepciones que indican un fallo transitorio del proveedor de IA y ameritan reintento
 _PROVIDER_ERRORS = (ModelAPIError, httpx.TimeoutException, httpx.ConnectError)
+
+
+@dataclass
+class _PendingReceipt:
+    """Archivo descargado a la espera de que el usuario provea el ticket ID."""
+
+    file_path: str
+    is_pdf: bool
+
+
+_pending_receipt: dict[str, _PendingReceipt] = {}
 
 SLOW_RESPONSE_THRESHOLD: float = 30.0
 HISTORY_SUMMARY_THRESHOLD: int = 30
@@ -113,6 +133,211 @@ def _extract_tools_used(result: AgentRunResult[str]) -> list[str]:
     return tools
 
 
+async def _store_pending_file(
+    user_number: str,
+    message_id: str,
+    file_path: str,
+    is_pdf: bool,
+) -> None:
+    """Guarda la ruta del archivo descargado y pide al usuario el número de ticket."""
+    _pending_receipt[user_number] = _PendingReceipt(file_path=file_path, is_pdf=is_pdf)
+    logger.info(
+        "[receipt] Stored pending %s for user=%s, waiting for ticket_id",
+        "PDF" if is_pdf else "image",
+        user_number,
+    )
+    await whatsapp_manager.send_text(
+        user_number=user_number,
+        text=(
+            "Recibí tu comprobante de pago. 🧾\n"
+            "Por favor envíame el número de ticket (ej: TKT-2026-03-00018) para registrar el pago:"
+        ),
+        message_id=message_id,
+    )
+
+
+async def _register_and_notify_payment(
+    user_number: str,
+    message_id: str,
+    file_path: str,
+    is_pdf: bool,
+    ticket_id: str,
+) -> None:
+    """Ejecuta OCR sobre el archivo, valida la titularidad del ticket, registra el pago y notifica al usuario."""
+    try:
+        if is_pdf:
+            receipt = await extract_payment_receipt_from_pdf(file_path)
+        else:
+            receipt = await extract_payment_receipt(file_path)
+    except Exception as exc:
+        logger.error(
+            "[ocr] OCR failed for user=%s file=%s: %s", user_number, file_path, exc
+        )
+        await notify_error(
+            exc,
+            context=f"_register_and_notify_payment OCR | user={user_number} | file={file_path}",
+        )
+        await whatsapp_manager.send_text(
+            user_number=user_number,
+            text=(
+                "No se pudo procesar el comprobante. "
+                "Por favor verifica el archivo e inténtalo de nuevo."
+            ),
+            message_id=message_id,
+        )
+        return
+
+    logger.info(
+        "[ocr] Extracted receipt data — "
+        "amount=%s | date=%s | reference=%s | account=%s | "
+        "recipient_name=%s | payment_method=%s | branch=%s | concept=%s",
+        receipt.amount,
+        receipt.date,
+        receipt.reference,
+        receipt.account,
+        receipt.recipient_name,
+        receipt.payment_method,
+        receipt.branch,
+        receipt.concept,
+    )
+
+    amount = parse_amount(receipt.amount)
+    if amount is None:
+        logger.error(
+            "[receipt] Could not parse amount for user=%s amount_raw=%s",
+            user_number,
+            receipt.amount,
+        )
+        await whatsapp_manager.send_text(
+            user_number=user_number,
+            text=(
+                "No se pudo determinar el monto del comprobante. "
+                "Por favor verifica el archivo e inténtalo de nuevo."
+            ),
+            message_id=message_id,
+        )
+        return
+
+    try:
+        await validate_ticket_ownership(
+            erp_client=erp_client,
+            user_phone=user_number,
+            ticket_id=ticket_id,
+        )
+    except ValueError as exc:
+        logger.warning(
+            "[receipt] Ticket validation failed for user=%s ticket=%s: %s",
+            user_number,
+            ticket_id,
+            exc,
+        )
+        await whatsapp_manager.send_text(
+            user_number=user_number,
+            text=f"⚠️ {exc}",
+            message_id=message_id,
+        )
+        return
+
+    ocr_payload = receipt.model_dump(exclude_none=True)
+    try:
+        result = await register_deposit_payment(
+            erp_client=erp_client,
+            ticket_id=ticket_id,
+            amount=amount,
+            ocr_payload=ocr_payload,
+        )
+    except ValueError as exc:
+        user_msg = erp_validation_user_message(exc)
+        if user_msg:
+            logger.warning(
+                "[receipt] ERP validation error for user=%s ticket=%s: %s",
+                user_number,
+                ticket_id,
+                exc,
+            )
+            await whatsapp_manager.send_text(
+                user_number=user_number,
+                text=f"⚠️ {user_msg}",
+                message_id=message_id,
+            )
+            return
+        logger.error(
+            "[receipt] Failed to register payment for user=%s ticket=%s: %s",
+            user_number,
+            ticket_id,
+            exc,
+            exc_info=True,
+        )
+        await notify_error(
+            exc,
+            context=f"_register_and_notify_payment | user={user_number} | ticket={ticket_id}",
+        )
+        await whatsapp_manager.send_text(
+            user_number=user_number,
+            text=(
+                "Ocurrió un error al registrar tu pago en el sistema. "
+                "Por favor inténtalo de nuevo o escala tu solicitud a un humano."
+            ),
+            message_id=message_id,
+        )
+        return
+    except Exception as exc:
+        logger.error(
+            "[receipt] Failed to register payment for user=%s ticket=%s: %s",
+            user_number,
+            ticket_id,
+            exc,
+            exc_info=True,
+        )
+        await notify_error(
+            exc,
+            context=f"_register_and_notify_payment | user={user_number} | ticket={ticket_id}",
+        )
+        await whatsapp_manager.send_text(
+            user_number=user_number,
+            text=(
+                "Ocurrió un error al registrar tu pago en el sistema. "
+                "Por favor inténtalo de nuevo o escala tu solicitud a un humano."
+            ),
+            message_id=message_id,
+        )
+        return
+
+    logger.info(
+        "[receipt] Payment registered — deposit_id=%s ticket_id=%s amount_paid=%.2f "
+        "amount_remaining=%.2f is_complete=%s",
+        result.deposit_id,
+        result.ticket_id,
+        result.amount_paid,
+        result.amount_remaining,
+        result.is_complete,
+    )
+    if result.is_complete:
+        msg = (
+            f"✅ ¡Seña pagada completamente!\n"
+            f"Depósito: {result.deposit_id}\n"
+            f"Ticket: {result.ticket_id}\n"
+            f"Total pagado: {result.total_amount_paid} UYU"
+        )
+        await whatsapp_manager.send_text(
+            user_number=user_number, text=msg, message_id=message_id
+        )
+        await _fetch_and_send_qr(
+            user_number=user_number,
+            ticket_id=ticket_id,
+        )
+    else:
+        msg = (
+            f"✅ Pago registrado exitosamente.\n"
+            f"Depósito: {result.deposit_id}\n"
+            f"Monto pagado: {result.amount_paid} UYU\n"
+            f"Monto restante: {result.amount_remaining} UYU"
+        )
+        await whatsapp_manager.send_text(
+            user_number=user_number, text=msg, message_id=message_id
+        )
+
+
 async def _process_message(message: Message) -> None:
     """Process a single message from the queue sequentially per user."""
     user_number = message.user_number
@@ -125,6 +350,47 @@ async def _process_message(message: Message) -> None:
 
     await whatsapp_manager.mark_read(message_id)
     await whatsapp_manager.send_typing_indicator(message_id)
+
+    # ------------------------------------------------------------------
+    # Pending payment receipt — waiting for ticket ID from the user
+    # ------------------------------------------------------------------
+    if user_number in _pending_receipt:
+        match = _TICKET_ID_RE.search(incoming_msg)
+        if match:
+            ticket_id_pending = match.group().upper()
+            logger.info(
+                "[receipt] Received ticket_id=%s for pending receipt of user=%s",
+                ticket_id_pending,
+                user_number,
+            )
+            pending = _pending_receipt.pop(user_number)
+            await _register_and_notify_payment(
+                user_number=user_number,
+                message_id=message_id,
+                file_path=pending.file_path,
+                is_pdf=pending.is_pdf,
+                ticket_id=ticket_id_pending,
+            )
+        else:
+            # Allow the user to cancel and return to normal conversation
+            if incoming_msg.strip().lower() in {"/cancelar", "/cancel", "/restart"}:
+                _pending_receipt.pop(user_number, None)
+                await whatsapp_manager.send_text(
+                    user_number=user_number,
+                    text="Registro de pago cancelado. ¿En qué más te puedo ayudar?",
+                    message_id=message_id,
+                )
+            else:
+                await whatsapp_manager.send_text(
+                    user_number=user_number,
+                    text=(
+                        "No encontré un número de ticket en tu mensaje. "
+                        "Por favor envíame el número de ticket (ej: TKT-2026-03-00018) "
+                        "o escribe /cancelar para cancelar el registro del pago:"
+                    ),
+                    message_id=message_id,
+                )
+        return
 
     # ------------------------------------------------------------------
     # Human-control check: skip AI if operator has taken over this chat
@@ -292,7 +558,7 @@ async def whatsapp_reply(request: Request, background_tasks: BackgroundTasks):
     user_number = message_data.user_number
     message_id = message_data.message_id
 
-    # --- Image receipt: OCR → ERP registration → notify user ---
+    # --- Image/PDF with ticket in caption: OCR already done → register payment ---
     if message_data.receipt is not None:
         await whatsapp_manager.mark_read(message_id)
         background_tasks.add_task(
@@ -300,6 +566,18 @@ async def whatsapp_reply(request: Request, background_tasks: BackgroundTasks):
             user_number=user_number,
             message_id=message_id,
             message_data=message_data,
+        )
+        return OK_STATUS
+
+    # --- Image/PDF without ticket in caption: store file path, ask for ticket ---
+    if message_data.media_file_path is not None:
+        await whatsapp_manager.mark_read(message_id)
+        background_tasks.add_task(
+            _store_pending_file,
+            user_number=user_number,
+            message_id=message_id,
+            file_path=message_data.media_file_path,
+            is_pdf=message_data.is_pdf,
         )
         return OK_STATUS
 
@@ -325,14 +603,18 @@ async def _process_image_receipt(
     message_id: str,
     message_data: ParsedMessage,
 ) -> None:
-    """Register a payment receipt in the ERP and notify the user via WhatsApp."""
-    receipt = message_data.receipt
-    ticket_id = message_data.ticket_id
+    """Llama a _register_and_notify_payment usando el ticket y el arquivo ya descargado.
 
-    if receipt is None:
+    Este handler se usa cuando el ticket venía en el caption del mensaje — el OCR
+    ya corrió en webhook_parser.py, y el media_file_path está disponible en message_data.
+    """
+    ticket_id = message_data.ticket_id
+    # receipt is set when OCR already ran (ticket was in caption)
+    # re-use existing receipt to avoid running OCR again
+    receipt = message_data.receipt
+    if receipt is None or ticket_id is None:
         return
 
-    # Validate required fields before hitting the ERP
     amount = parse_amount(receipt.amount)
     if amount is None:
         logger.error(
@@ -345,21 +627,6 @@ async def _process_image_receipt(
             text=(
                 "No se pudo determinar el monto del comprobante. "
                 "Por favor verifica la imagen e inténtalo de nuevo."
-            ),
-            message_id=message_id,
-        )
-        return
-
-    if not ticket_id:
-        logger.warning(
-            "[receipt] No ticket_id in caption for user=%s — cannot register payment",
-            user_number,
-        )
-        await whatsapp_manager.send_text(
-            user_number=user_number,
-            text=(
-                "Para registrar tu pago necesito el número de ticket (ej: TKT-2026-03-00018). "
-                "Por favor envía la imagen con el número de ticket como descripción."
             ),
             message_id=message_id,
         )
@@ -469,10 +736,7 @@ async def _process_image_receipt(
         await whatsapp_manager.send_text(
             user_number=user_number, text=msg, message_id=message_id
         )
-        await _fetch_and_send_qr(
-            user_number=user_number,
-            ticket_id=ticket_id,
-        )
+        await _fetch_and_send_qr(user_number=user_number, ticket_id=ticket_id)
     else:
         msg = (
             f"✅ Pago registrado exitosamente.\n"
@@ -492,7 +756,5 @@ async def _fetch_and_send_qr(user_number: str, ticket_id: str) -> None:
         user_number: Número de WhatsApp del usuario.
         ticket_id: Identificador del ticket para el que se solicita el QR.
     """
-    logger.info(
-        "[_fetch_and_send_qr] user=%s ticket_id=%s", user_number, ticket_id
-    )
+    logger.info("[_fetch_and_send_qr] user=%s ticket_id=%s", user_number, ticket_id)
     return

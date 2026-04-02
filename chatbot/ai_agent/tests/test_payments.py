@@ -3,7 +3,7 @@
 """Functional tests for payment instruction tools against the real ERP API.
 
 Controllers covered:
-  - deposit_controller (get_payment_link_or_instructions, record_deposit_payment)
+    - deposit_controller (get_deposit_instructions, record_deposit_payment)
 
 Flujo:
   1. Llama a get_payment_instructions con un ticket_id fijo.

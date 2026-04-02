@@ -10,10 +10,10 @@ import httpx
 from chatbot.ai_agent.models import ERP_BASE_PATH, PaymentInstructions
 from chatbot.ai_agent.tools.erp_utils import extract_erp_data
 from chatbot.db.services import Services
-from chatbot.reminders.lead_followup import CHANNEL_TELEGRAM, infer_channel
 from chatbot.messaging.telegram_notifier import notify_error
 from chatbot.messaging.telegram_notifier import send_message as send_telegram_message
 from chatbot.messaging.whatsapp import whatsapp_manager
+from chatbot.reminders.lead_followup import CHANNEL_TELEGRAM, infer_channel
 
 logger = logging.getLogger(__name__)
 
@@ -49,7 +49,7 @@ async def _get_payment_instructions(
     """
     try:
         response = await erp_client.post(
-            f"{ERP_BASE_PATH}.deposit_controller.get_payment_link_or_instructions",
+            f"{ERP_BASE_PATH}.deposit_controller.get_deposit_instructions",
             json={"ticket_id": ticket_id},
             timeout=ERP_TIMEOUT_SECONDS,
         )

@@ -289,9 +289,7 @@ async def notify_ticket_status(body: ERPTicketStatusRequest) -> dict[str, str]:
     # so the customer knows how much to pay and where.
     if body.new_status == TicketDecision.APPROVED:
         await _send_payment_instructions(phone=phone, ticket_id=body.ticket_id)
-        await services.register_confirmed_ticket(
-            ticket_id=body.ticket_id, phone=phone
-        )
+        await services.register_confirmed_ticket(ticket_id=body.ticket_id, phone=phone)
 
     return {"status": "ok", "phone": phone}
 
@@ -303,12 +301,10 @@ async def _send_payment_instructions(phone: str, ticket_id: str) -> None:
         phone: Número de WhatsApp del cliente.
         ticket_id: Identificador del ticket cuyo depósito se debe pagar.
     """
-    logger.info(
-        "[_send_payment_instructions] phone=%s ticket_id=%s", phone, ticket_id
-    )
+    logger.info("[_send_payment_instructions] phone=%s ticket_id=%s", phone, ticket_id)
     try:
         pay_resp = await erp_client.post(
-            f"{ERP_BASE_PATH}.deposit_controller.get_payment_link_or_instructions",
+            f"{ERP_BASE_PATH}.deposit_controller.get_deposit_instructions",
             json={"ticket_id": ticket_id},
             timeout=ERP_TIMEOUT,
         )

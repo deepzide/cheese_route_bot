@@ -848,9 +848,9 @@ class RouteBookingStatus(BaseModel):
 
 
 class PaymentInstructions(BaseModel):
-    """Payment link and instructions for a ticket deposit.
+    """Payment instructions for a ticket deposit.
 
-    ERP endpoint: deposit_controller.get_payment_link_or_instructions
+    ERP endpoint: deposit_controller.get_deposit_instructions
     ERP response fields: deposit_id, ticket_id, amount_required, amount_paid,
     amount_remaining, due_at, status, payment_link, instructions.
     """

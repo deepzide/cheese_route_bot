@@ -54,8 +54,9 @@ class ParsedMessage:
     """Result of parsing an incoming webhook message.
 
     For text/audio messages, ``text`` is set and ``receipt`` is None.
-    For image messages (payment receipts), ``receipt`` is set and ``text`` is None.
-    ``ticket_id`` is extracted from the image caption when available.
+    For image/PDF messages with ticket in caption, ``receipt`` and ``ticket_id`` are set.
+    For image/PDF messages WITHOUT ticket in caption, ``media_file_path`` and ``is_pdf``
+    are set so the router can store the path and defer OCR until the ticket arrives.
     """
 
     user_number: str
@@ -63,6 +64,8 @@ class ParsedMessage:
     text: str | None = None
     receipt: PaymentReceipt | None = None
     ticket_id: str | None = None
+    media_file_path: str | None = None
+    is_pdf: bool = False
 
 
 async def extract_message_content(webhook_data: dict) -> ParsedMessage | None:
@@ -118,7 +121,7 @@ async def extract_message_content(webhook_data: dict) -> ParsedMessage | None:
                     return None
 
                 try:
-                    receipt, ticket_id = await _extract_image_from_message(
+                    receipt, ticket_id, file_path = await _extract_image_from_message(
                         user_number=user_number,
                         media_url=media_url,
                         headers=headers,
@@ -134,6 +137,8 @@ async def extract_message_content(webhook_data: dict) -> ParsedMessage | None:
                 message_id=message_id,
                 receipt=receipt,
                 ticket_id=ticket_id,
+                media_file_path=file_path if receipt is None else None,
+                is_pdf=False,
             )
 
         elif message_type == "document":
@@ -159,7 +164,7 @@ async def extract_message_content(webhook_data: dict) -> ParsedMessage | None:
                     return None
 
                 try:
-                    receipt, ticket_id = await _extract_pdf_from_message(
+                    receipt, ticket_id, file_path = await _extract_pdf_from_message(
                         user_number=user_number,
                         media_url=media_url,
                         headers=headers,
@@ -175,6 +180,8 @@ async def extract_message_content(webhook_data: dict) -> ParsedMessage | None:
                 message_id=message_id,
                 receipt=receipt,
                 ticket_id=ticket_id,
+                media_file_path=file_path if receipt is None else None,
+                is_pdf=True,
             )
 
         elif message_type == "audio":
@@ -304,8 +311,13 @@ async def _extract_image_from_message(
     headers: dict[str, str],
     client: httpx.AsyncClient,
     caption: str | None = None,
-) -> tuple[PaymentReceipt, str | None]:
-    """Descarga una imagen de WhatsApp, la guarda en static/images y ejecuta OCR.
+) -> tuple[PaymentReceipt | None, str | None, str]:
+    """Descarga una imagen de WhatsApp y la guarda en static/images.
+
+    Si el caption contiene un ticket ID ejecuta el OCR de inmediato y devuelve
+    el PaymentReceipt junto al ticket.  Si no hay ticket en el caption, omite el
+    OCR y devuelve (None, None, file_path) para que el router espere el ticket
+    en el próximo mensaje antes de procesar el comprobante.
 
     Args:
         user_number: Número de teléfono del remitente (usado como nombre de archivo).
@@ -315,8 +327,7 @@ async def _extract_image_from_message(
         caption: Caption opcional del mensaje de imagen (puede contener ticket_id).
 
     Returns:
-        Tuple (PaymentReceipt, ticket_id) donde ticket_id se extrae del caption si
-        coincide con el patrón TKT-YYYY-MM-NNNNN, o None si no está disponible.
+        Tuple (receipt | None, ticket_id | None, file_path).
     """
     ext_map: dict[str, str] = {
         "image/jpeg": ".jpg",
@@ -343,9 +354,24 @@ async def _extract_image_from_message(
 
     logger.info("[image] Saved image to %s", file_path)
 
-    receipt = await extract_payment_receipt(str(file_path))
+    # Extract ticket_id from caption
+    ticket_id: str | None = None
+    if caption:
+        match = _TICKET_ID_RE.search(caption)
+        if match:
+            ticket_id = match.group().upper()
+            logger.info("[image] Extracted ticket_id=%s from caption", ticket_id)
+        else:
+            logger.debug("[image] Caption present but no ticket_id found: %r", caption)
 
-    # Log all extracted OCR fields
+    # Only run OCR if we already have the ticket — otherwise defer to next message
+    if not ticket_id:
+        logger.info(
+            "[image] No ticket_id in caption for user=%s — deferring OCR", user_number
+        )
+        return None, None, str(file_path)
+
+    receipt = await extract_payment_receipt(str(file_path))
     logger.info(
         "[ocr] Extracted receipt data — "
         "amount=%s | date=%s | reference=%s | account=%s | "
@@ -359,18 +385,7 @@ async def _extract_image_from_message(
         receipt.branch,
         receipt.concept,
     )
-
-    # Extract ticket_id from caption if it matches the ERP ticket pattern
-    ticket_id: str | None = None
-    if caption:
-        match = _TICKET_ID_RE.search(caption)
-        if match:
-            ticket_id = match.group().upper()
-            logger.info("[image] Extracted ticket_id=%s from caption", ticket_id)
-        else:
-            logger.debug("[image] Caption present but no ticket_id found: %r", caption)
-
-    return receipt, ticket_id
+    return receipt, ticket_id, str(file_path)
 
 
 async def _extract_pdf_from_message(
@@ -379,8 +394,12 @@ async def _extract_pdf_from_message(
     headers: dict[str, str],
     client: httpx.AsyncClient,
     caption: str | None = None,
-) -> tuple[PaymentReceipt, str | None]:
-    """Descarga un PDF de WhatsApp, lo guarda en static/documents y ejecuta OCR.
+) -> tuple[PaymentReceipt | None, str | None, str]:
+    """Descarga un PDF de WhatsApp y lo guarda en static/documents.
+
+    Si el caption contiene un ticket ID ejecuta el OCR de inmediato y devuelve
+    el PaymentReceipt junto al ticket.  Si no hay ticket en el caption, omite el
+    OCR y devuelve (None, None, file_path) para que el router espere el ticket.
 
     Args:
         user_number: Número de teléfono del remitente (usado como nombre de archivo).
@@ -390,8 +409,7 @@ async def _extract_pdf_from_message(
         caption: Caption opcional del mensaje (puede contener ticket_id).
 
     Returns:
-        Tuple (PaymentReceipt, ticket_id) donde ticket_id se extrae del caption si
-        coincide con el patrón TKT-YYYY-MM-NNNNN, o None si no está disponible.
+        Tuple (receipt | None, ticket_id | None, file_path).
     """
     async with client.stream(
         "GET",
@@ -410,9 +428,24 @@ async def _extract_pdf_from_message(
 
     logger.info("[pdf] Saved PDF to %s", file_path)
 
-    receipt = await extract_payment_receipt_from_pdf(str(file_path))
+    # Extract ticket_id from caption
+    ticket_id: str | None = None
+    if caption:
+        match = _TICKET_ID_RE.search(caption)
+        if match:
+            ticket_id = match.group().upper()
+            logger.info("[pdf] Extracted ticket_id=%s from caption", ticket_id)
+        else:
+            logger.debug("[pdf] Caption present but no ticket_id found: %r", caption)
 
-    # Log all extracted OCR fields
+    # Only run OCR if we already have the ticket — otherwise defer to next message
+    if not ticket_id:
+        logger.info(
+            "[pdf] No ticket_id in caption for user=%s — deferring OCR", user_number
+        )
+        return None, None, str(file_path)
+
+    receipt = await extract_payment_receipt_from_pdf(str(file_path))
     logger.info(
         "[ocr] Extracted receipt data — "
         "amount=%s | date=%s | reference=%s | account=%s | "
@@ -426,18 +459,7 @@ async def _extract_pdf_from_message(
         receipt.branch,
         receipt.concept,
     )
-
-    # Extract ticket_id from caption if it matches the ERP ticket pattern
-    ticket_id: str | None = None
-    if caption:
-        match = _TICKET_ID_RE.search(caption)
-        if match:
-            ticket_id = match.group().upper()
-            logger.info("[pdf] Extracted ticket_id=%s from caption", ticket_id)
-        else:
-            logger.debug("[pdf] Caption present but no ticket_id found: %r", caption)
-
-    return receipt, ticket_id
+    return receipt, ticket_id, str(file_path)
 
 
 def _format_receipt_as_text(receipt: PaymentReceipt) -> str:

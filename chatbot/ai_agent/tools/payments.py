@@ -199,7 +199,9 @@ async def validate_ticket_ownership(
         timeout=ERP_TIMEOUT_SECONDS,
     )
     itinerary_resp.raise_for_status()
-    itinerary = CustomerItinerary.model_validate(extract_erp_data(itinerary_resp.json()))
+    itinerary = CustomerItinerary.model_validate(
+        extract_erp_data(itinerary_resp.json())
+    )
 
     for item in itinerary.itinerary:
         for reservation in item.reservations:
@@ -216,20 +218,17 @@ async def validate_ticket_ownership(
                 )
                 return
 
-    raise ValueError(
-        f"El ticket {ticket_id} no pertenece al número {user_phone}."
-    )
+    raise ValueError(f"El ticket {ticket_id} no pertenece al número {user_phone}.")
 
 
 async def get_payment_instructions(
     ctx: RunContext[AgentDeps],
     ticket_id: str,
 ) -> PaymentInstructions:
-    """Retrieve payment link and instructions for an individual experience ticket.
+    """Retrieve deposit payment instructions for an individual experience ticket.
 
-    Calls the ERP endpoint deposit_controller.get_payment_link_or_instructions
-    and returns the deposit details including the payment link, amounts and
-    instructions needed for the user to complete the payment.
+    Calls the ERP endpoint deposit_controller.get_deposit_instructions and
+    returns the deposit details needed for the user to complete the payment.
 
     Args:
         ctx: Agent run context with dependencies.
@@ -238,7 +237,7 @@ async def get_payment_instructions(
     logger.info("[get_payment_instructions] ticket_id=%s", ticket_id)
 
     response = await ctx.deps.erp_client.post(
-        f"{ERP_BASE_PATH}.deposit_controller.get_payment_link_or_instructions",
+        f"{ERP_BASE_PATH}.deposit_controller.get_deposit_instructions",
         json={"ticket_id": ticket_id},
         timeout=ERP_TIMEOUT_SECONDS,
     )
@@ -251,6 +250,6 @@ async def get_payment_instructions(
 
     data = extract_erp_data(response.json())
     result = PaymentInstructions.model_validate(data)
-    # Temporarily suppress payment_link — do not expose it to the user.
+    # Preserve the public contract even if the ERP omits payment_link.
     result.payment_link = None
     return result

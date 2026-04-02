@@ -53,12 +53,12 @@ from chatbot.api.utils.survey_feedback import (
     get_pending_survey,
 )
 from chatbot.api.utils.telegram_commands import (
-    cmd_activity_completed,
     cmd_cancel_reservation,
     cmd_get_availability,
     cmd_get_establishment_details,
     cmd_get_experience_detail,
     cmd_get_itinerary,
+    cmd_get_phone,
     cmd_get_reservation_status,
     cmd_get_reservations,
     cmd_get_route_availability,
@@ -71,6 +71,7 @@ from chatbot.api.utils.telegram_commands import (
     cmd_resolve_or_create_contact,
     cmd_start_followups,
     cmd_stop_followups,
+    cmd_test_dev_notifications,
     cmd_update_contact,
     cmd_upsert_lead,
 )
@@ -863,6 +864,10 @@ def build_application() -> Application:
     app.add_handler(CommandHandler("start", _handle_start))
     app.add_handler(CommandHandler("restart", _handle_restart))
     app.add_handler(CommandHandler("change_phone", _handle_change_phone))
+    app.add_handler(CommandHandler("get_phone", cmd_get_phone))
+    app.add_handler(
+        CommandHandler("test_dev_notifications", cmd_test_dev_notifications)
+    )
 
     # Direct tool commands — bypass AI agent
     app.add_handler(CommandHandler("list_experiences", cmd_list_experiences))
@@ -893,7 +898,6 @@ def build_application() -> Application:
     )
     app.add_handler(CommandHandler("get_itinerary", cmd_get_itinerary))
     app.add_handler(CommandHandler("cancel_reservation", cmd_cancel_reservation))
-    app.add_handler(CommandHandler("activity_completed", cmd_activity_completed))
     app.add_handler(
         CommandHandler("list_available_experiences", cmd_list_available_experiences)
     )

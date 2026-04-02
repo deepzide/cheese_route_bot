@@ -381,40 +381,62 @@ def _validate_activity_completed_payload(
         )
 
 
-async def trigger_activity_completed_survey(
-    body: ERPSurveyRequest,
-    *,
-    channel: str = "whatsapp",
-    telegram_chat_id: str | None = None,
-) -> dict[str, str]:
-    """Ejecuta las validaciones de activity_completed y envía la encuesta por el canal indicado."""
-    logger.info(
-        "[trigger-activity-completed] channel=%s contact_id=%s experience_id=%s slot_id=%s ticket_id=%s",
-        channel,
-        body.contact_id,
-        body.experience_id,
-        body.slot_id,
-        body.ticket_id,
+def _build_activity_completed_request(
+    contact_id: str, ticket: ReservationStatusDetail
+) -> ERPSurveyRequest:
+    """Construye el payload de encuesta usando los datos ya resueltos del ticket."""
+    experience_id = ticket.experience.experience_id if ticket.experience else None
+    if not experience_id:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=(
+                f"El ticket {ticket.ticket_id} no contiene una experiencia válida "
+                "para disparar la encuesta"
+            ),
+        )
+
+    slot_id = ticket.slot.slot_id if ticket.slot else None
+    if not slot_id:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=(
+                f"El ticket {ticket.ticket_id} no contiene un slot válido "
+                "para disparar la encuesta"
+            ),
+        )
+
+    return ERPSurveyRequest(
+        contact_id=contact_id,
+        experience_id=experience_id,
+        slot_id=slot_id,
+        ticket_id=ticket.ticket_id,
     )
 
-    contact = await _get_contact_by_id(body.contact_id)
-    if not contact.phone:
+
+async def _dispatch_activity_completed_survey(
+    body: ERPSurveyRequest,
+    contact: ContactInfo,
+    ticket: ReservationStatusDetail,
+    *,
+    channel: str,
+    telegram_chat_id: str | None = None,
+) -> dict[str, str]:
+    """Envía la encuesta luego de validar la consistencia de la reserva completada."""
+    _validate_activity_completed_payload(body=body, contact=contact, ticket=ticket)
+    phone = contact.phone
+    if not phone:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail=f"El contacto {body.contact_id} no tiene teléfono registrado en el ERP",
         )
 
-    await _get_experience_detail(body.experience_id)
-    ticket = await _get_reservation_status(body.ticket_id)
-    _validate_activity_completed_payload(body=body, contact=contact, ticket=ticket)
-
     if channel == "whatsapp":
-        last_msg = await services.get_last_user_message(contact.phone)
+        last_msg = await services.get_last_user_message(phone)
         if last_msg is None:
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
                 detail=(
-                    f"No hay mensajes del usuario {contact.phone} en la base de datos. "
+                    f"No hay mensajes del usuario {phone} en la base de datos. "
                     "La ventana de 24h de META no está activa."
                 ),
             )
@@ -423,27 +445,27 @@ async def trigger_activity_completed_survey(
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
                 detail=(
-                    f"La ventana de mensajes gratuitos de 24h de META para {contact.phone} ha expirado. "
+                    f"La ventana de mensajes gratuitos de 24h de META para {phone} ha expirado. "
                     "El último mensaje del usuario fue hace más de 24 horas."
                 ),
             )
 
         ok = await whatsapp_manager.send_text(
-            user_number=contact.phone,
+            user_number=phone,
             text=SURVEY_MESSAGE,
         )
         if not ok:
             logger.error(
-                "[trigger-activity-completed] Error enviando encuesta de satisfacción por WhatsApp a %s",
-                contact.phone,
+                "[_dispatch_activity_completed_survey] Error enviando encuesta de satisfacción por WhatsApp a %s",
+                phone,
             )
             raise HTTPException(
                 status_code=status.HTTP_502_BAD_GATEWAY,
-                detail=f"Error al enviar la encuesta de satisfacción a {contact.phone}",
+                detail=f"Error al enviar la encuesta de satisfacción a {phone}",
             )
 
         set_pending_survey(
-            contact.phone,
+            phone,
             PendingSurvey(
                 contact_id=body.contact_id,
                 experience_id=body.experience_id,
@@ -451,8 +473,8 @@ async def trigger_activity_completed_survey(
                 ticket_id=body.ticket_id,
             ),
         )
-        await message_handler.save_assistant_msg(contact.phone, SURVEY_MESSAGE, [])
-        return {"status": "survey_sent", "phone": contact.phone}
+        await message_handler.save_assistant_msg(phone, SURVEY_MESSAGE, [])
+        return {"status": "survey_sent", "phone": phone}
 
     if channel == "telegram":
         if not telegram_chat_id:
@@ -464,7 +486,7 @@ async def trigger_activity_completed_survey(
         ok = await send_telegram(chat_id=telegram_chat_id, text=SURVEY_MESSAGE)
         if not ok:
             logger.error(
-                "[trigger-activity-completed] Error enviando encuesta de satisfacción por Telegram a chat_id=%s",
+                "[_dispatch_activity_completed_survey] Error enviando encuesta de satisfacción por Telegram a chat_id=%s",
                 telegram_chat_id,
             )
             raise HTTPException(
@@ -633,7 +655,7 @@ async def notify_ticket_status(body: ERPTicketStatusRequest) -> dict[str, str]:
     Body:
         - contact_id: ID del contacto en el ERP.
         - ticket_id: ID del ticket afectado.
-        - new_status: Nuevo estado (confirmed | cancelled | no_show | rejected | expired | checked_in).
+        - new_status: Nuevo estado (confirmed | cancelled | no_show | rejected | expired | checked_in | completed).
         - observations: Texto adicional opcional del operador.
     """
     logger.info(
@@ -655,6 +677,15 @@ async def notify_ticket_status(body: ERPTicketStatusRequest) -> dict[str, str]:
     _validate_ticket_status_payload(body=body, contact=contact, ticket=ticket)
 
     phone = contact.phone
+
+    if body.new_status == TicketDecision.COMPLETED:
+        survey_request = _build_activity_completed_request(body.contact_id, ticket)
+        return await _dispatch_activity_completed_survey(
+            survey_request,
+            contact,
+            ticket,
+            channel="whatsapp",
+        )
 
     # 2. Construir y enviar el mensaje
     message = _build_ticket_message(body.new_status, body.ticket_id, body.observations)
@@ -686,22 +717,6 @@ async def notify_ticket_status(body: ERPTicketStatusRequest) -> dict[str, str]:
         await services.register_confirmed_ticket(ticket_id=body.ticket_id, phone=phone)
 
     return {"status": "ok", "phone": phone}
-
-
-@router.post(
-    "/activity-completed", summary="Enviar encuesta de satisfacción tras actividad"
-)
-async def activity_completed(body: ERPSurveyRequest) -> dict[str, str]:
-    """Notifica que se completó una actividad y envía una encuesta de satisfacción.
-
-    Body:
-        - contact_id: ID del contacto en el ERP.
-        - experience_id: ID de la experiencia completada.
-        - slot_id: ID del slot en que se realizó la actividad.
-        - ticket_id: ID del ticket asociado.
-
-    """
-    return await trigger_activity_completed_survey(body, channel="whatsapp")
 
 
 # ---------------------------------------------------------------------------

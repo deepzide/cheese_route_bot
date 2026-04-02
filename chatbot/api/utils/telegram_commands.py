@@ -6,6 +6,8 @@ data without going through the LLM layer.
 
 Commands registered:
   /list_experiences               [fecha=YYYY-MM-DD]
+  /get_phone
+  /test_dev_notifications
   /get_experience_detail          <id>
   /list_routes
   /get_route_detail               <id>
@@ -32,6 +34,7 @@ from __future__ import annotations
 import html
 import json
 import logging
+from datetime import datetime
 from typing import Any
 
 import httpx
@@ -44,7 +47,6 @@ from telegram.ext import ContextTypes
 from chatbot.ai_agent.context import webhook_context_manager
 from chatbot.ai_agent.dependencies import AgentDeps
 from chatbot.ai_agent.instructions import resolve_or_create_contact
-from chatbot.ai_agent.models import ERPSurveyRequest
 from chatbot.ai_agent.tools.booking import (
     cancel_reservation,
     get_customer_itinerary,
@@ -68,9 +70,13 @@ from chatbot.ai_agent.tools.notifications import (
     start_lead_followups,
     stop_lead_followups,
 )
-from chatbot.api.erp_router import trigger_activity_completed_survey
+from chatbot.core.config import config
 from chatbot.db.services import services
-from chatbot.messaging.telegram_notifier import notify_error
+from chatbot.messaging.telegram_notifier import (
+    _build_slow_response_message,
+    notify_error,
+    send_message,
+)
 from chatbot.messaging.whatsapp import WhatsAppManager
 
 logger = logging.getLogger(__name__)
@@ -122,6 +128,12 @@ def _build_ctx(chat_id: str) -> RunContext[AgentDeps]:
     object.__setattr__(ctx, "tool_name", "telegram_cmd")
     object.__setattr__(ctx, "messages", [])
     return ctx
+
+
+def _get_registered_phone(chat_id: str) -> str | None:
+    """Return the registered phone number for a Telegram chat, if present."""
+    phone = _phones_registry.get(chat_id, "").strip()
+    return phone or None
 
 
 def _to_json_block(data: Any) -> str:
@@ -196,6 +208,84 @@ async def _send_error(
             f"⚠️ Error while running the command: `{exc}`",
             parse_mode="Markdown",
         )
+
+
+# ---------------------------------------------------------------------------
+# /get_phone
+# ---------------------------------------------------------------------------
+
+
+async def cmd_get_phone(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """/get_phone — shows the phone number registered in the bot memory."""
+    del context
+    if not update.message or not update.effective_chat:
+        return
+
+    chat_id = str(update.effective_chat.id)
+    phone = _get_registered_phone(chat_id)
+    if not phone:
+        await update.message.reply_text(
+            "⚠️ No phone number is registered for this chat. Use `/change_phone` or send your number first.",
+            parse_mode="Markdown",
+        )
+        return
+
+    await update.message.reply_text(
+        f"📱 Registered phone for this chat: `{phone}`",
+        parse_mode="Markdown",
+    )
+
+
+# ---------------------------------------------------------------------------
+# /test_dev_notifications
+# ---------------------------------------------------------------------------
+
+
+async def cmd_test_dev_notifications(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> None:
+    """/test_dev_notifications — sends developer notification test messages."""
+    del context
+    if not update.message or not update.effective_chat:
+        return
+
+    if not config.TELEGRAM_BOT_TOKEN_NOTIFIER or not config.TELEGRAM_DEV_CHAT_ID:
+        await update.message.reply_text(
+            "⚠️ Developer Telegram notifications are not configured.",
+        )
+        return
+
+    chat_id = str(update.effective_chat.id)
+    phone = _get_registered_phone(chat_id) or "not_registered"
+
+    await notify_error(
+        RuntimeError("Telegram dev notification test"),
+        context=f"telegram_cmd_test | chat_id={chat_id} | phone={phone}",
+    )
+
+    slow_response_message = _build_slow_response_message(
+        phone=phone,
+        user_message="Developer notification test triggered from Telegram command.",
+        tools_used=["notify_error", "_build_slow_response_message"],
+        ai_response="This is a synthetic slow-response message generated from /test_dev_notifications.",
+        message_datetime=datetime.now(),
+        history_count=1,
+        response_time=42.0,
+        provider_error="Synthetic provider timeout for notifier validation",
+    )
+    slow_message_sent = await send_message(
+        config.TELEGRAM_DEV_CHAT_ID,
+        slow_response_message,
+        parse_mode="Markdown",
+    )
+
+    lines = [
+        "Developer notification test completed.",
+        "- `notify_error` was triggered.",
+        f"- Slow-response test message sent: `{'yes' if slow_message_sent else 'no'}`.",
+        f"- Developer chat: `{config.TELEGRAM_DEV_CHAT_ID}`.",
+    ]
+    await update.message.reply_text("\n".join(lines), parse_mode="Markdown")
 
 
 # ---------------------------------------------------------------------------
@@ -777,56 +867,6 @@ async def cmd_cancel_reservation(
         result = await cancel_reservation(ctx, reservation_id=ticket_id, confirmed=True)
     except Exception as exc:
         await _send_error(update, exc, f"cmd_cancel_reservation id={ticket_id}")
-        return
-
-    await update.message.reply_text(_to_json_block(result), parse_mode="Markdown")
-
-
-# ---------------------------------------------------------------------------
-# /activity_completed <contact_id> <experience_id> <slot_id> <ticket_id>
-# ---------------------------------------------------------------------------
-
-
-async def cmd_activity_completed(
-    update: Update, context: ContextTypes.DEFAULT_TYPE
-) -> None:
-    """/activity_completed <contact_id> <experience_id> <slot_id> <ticket_id> — dispara manualmente el flujo de encuesta post-actividad."""
-    if not update.message or not update.effective_chat:
-        return
-
-    args: list[str] = context.args or []
-    if len(args) != 4:  # noqa: PLR2004
-        await update.message.reply_text(
-            "Usage: `/activity_completed <contact_id> <experience_id> <slot_id> <ticket_id>`\n"
-            "Example: `/activity_completed CNT-001 EXP-001 SLOT-001 TKT-2026-03-00018`",
-            parse_mode="Markdown",
-        )
-        return
-
-    request = ERPSurveyRequest(
-        contact_id=args[0],
-        experience_id=args[1],
-        slot_id=args[2],
-        ticket_id=args[3],
-    )
-
-    try:
-        result = await trigger_activity_completed_survey(
-            request,
-            channel="telegram",
-            telegram_chat_id=str(update.effective_chat.id),
-        )
-    except Exception as exc:
-        await _send_error(
-            update,
-            exc,
-            (
-                "cmd_activity_completed "
-                f"contact_id={request.contact_id} "
-                f"experience_id={request.experience_id} "
-                f"slot_id={request.slot_id} ticket_id={request.ticket_id}"
-            ),
-        )
         return
 
     await update.message.reply_text(_to_json_block(result), parse_mode="Markdown")

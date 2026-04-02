@@ -1008,12 +1008,14 @@ class PaymentReceipt(BaseModel):
 class TicketDecision(StrEnum):
     """Ticket statuses that can trigger a customer notification webhook."""
 
+    PENDING = "PENDING"
     APPROVED = "CONFIRMED"
+    CHECKED_IN = "CHECKED_IN"
+    COMPLETED = "COMPLETED"
     CANCELLED = "CANCELLED"
     NO_SHOW = "NO_SHOW"
     REJECTED = "REJECTED"
     EXPIRED = "EXPIRED"
-    CHECKED_IN = "CHECKED_IN"
 
 
 class ERPSendMessageRequest(BaseModel):
@@ -1061,6 +1063,8 @@ class ERPTicketStatusRequest(BaseModel):
         normalized = value.strip().upper().replace("-", "_").replace(" ", "_")
         if normalized == "APPROVED":
             return TicketDecision.APPROVED.value
+        if normalized == "COMPLETADO":
+            return TicketDecision.COMPLETED.value
         return normalized
 
 

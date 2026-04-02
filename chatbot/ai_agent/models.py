@@ -884,6 +884,8 @@ class DepositPaymentResult(BaseModel):
     new_status: str
     verification_method: str
     is_complete: bool
+    receipt_file_id: str | None = None
+    receipt_file_url: str | None = None
 
 
 # ---------------------------------------------------------------------------

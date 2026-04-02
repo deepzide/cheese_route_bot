@@ -254,6 +254,7 @@ async def _register_and_notify_payment(
             ticket_id=ticket_id,
             amount=amount,
             ocr_payload=ocr_payload,
+            receipt_file_path=file_path,
         )
     except ValueError as exc:
         user_msg = erp_validation_user_message(exc)
@@ -709,10 +710,11 @@ async def _process_image_receipt(
     ya corrió en webhook_parser.py, y el media_file_path está disponible en message_data.
     """
     ticket_id = message_data.ticket_id
+    file_path = message_data.media_file_path
     # receipt is set when OCR already ran (ticket was in caption)
     # re-use existing receipt to avoid running OCR again
     receipt = message_data.receipt
-    if receipt is None or ticket_id is None:
+    if receipt is None or ticket_id is None or file_path is None:
         return
 
     amount = parse_amount(receipt.amount)
@@ -759,6 +761,7 @@ async def _process_image_receipt(
             ticket_id=ticket_id,
             amount=amount,
             ocr_payload=ocr_payload,
+            receipt_file_path=file_path,
         )
     except ValueError as exc:
         user_msg = erp_validation_user_message(exc)

@@ -5,8 +5,10 @@ Controller: deposit_controller
 
 from __future__ import annotations
 
+import json
 import logging
 import re
+from pathlib import Path
 
 import httpx
 from pydantic_ai import ModelRetry, RunContext
@@ -33,6 +35,14 @@ _ERP_VALIDATION_MESSAGES: dict[str, str] = {
     "cannot exceed": "El monto del comprobante supera el monto requerido para el depósito.",
     "PAID deposit": "El depósito ya fue pagado completamente.",
     "already paid": "El depósito ya fue pagado completamente.",
+}
+
+_RECEIPT_CONTENT_TYPES: dict[str, str] = {
+    ".pdf": "application/pdf",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".png": "image/png",
+    ".webp": "image/webp",
 }
 
 
@@ -105,6 +115,7 @@ async def register_deposit_payment(
     ticket_id: str,
     amount: float,
     ocr_payload: dict | None = None,
+    receipt_file_path: str | None = None,
 ) -> DepositPaymentResult:
     """Register a deposit payment in the ERP.
 
@@ -115,6 +126,7 @@ async def register_deposit_payment(
         ticket_id: ERP ticket identifier (e.g. TKT-2026-03-00018).
         amount: Amount paid, extracted from the receipt.
         ocr_payload: Optional raw OCR data dict to attach to the payment record.
+        receipt_file_path: Local path to the downloaded receipt PDF/image.
 
     Returns:
         DepositPaymentResult with the registered payment details.
@@ -125,26 +137,61 @@ async def register_deposit_payment(
     """
     # Normalize the `amount` field inside ocr_payload to float.
     # The ERP rejects raw OCR strings like "40.00 Bs.".
-    if ocr_payload:
+    if ocr_payload and "amount" in ocr_payload:
         ocr_payload["amount"] = parse_amount(ocr_payload["amount"])
 
     logger.info(
-        "[register_deposit_payment] ticket_id=%s amount=%.2f ocr_payload=%s",
+        "[register_deposit_payment] ticket_id=%s amount=%.2f receipt_file_path=%s ocr_payload=%s",
         ticket_id,
         amount,
+        receipt_file_path,
         ocr_payload,
     )
 
-    response = await erp_client.post(
-        f"{ERP_BASE_PATH}.deposit_controller.record_deposit_payment",
-        json={
+    if receipt_file_path is not None:
+        receipt_path = Path(receipt_file_path)
+        if not receipt_path.exists():
+            raise FileNotFoundError(
+                f"Receipt file not found for ticket {ticket_id}: {receipt_file_path}"
+            )
+
+        content_type = _RECEIPT_CONTENT_TYPES.get(
+            receipt_path.suffix.lower(),
+            "application/octet-stream",
+        )
+        form_data = {
             "ticket_id": ticket_id,
-            "amount": amount,
+            "amount": str(amount),
             "verification_method": "OCR",
-            "ocr_payload": ocr_payload,
-        },
-        timeout=ERP_TIMEOUT_SECONDS,
-    )
+            "ocr_payload": json.dumps(ocr_payload)
+            if ocr_payload is not None
+            else "null",
+            "attach_receipt": "true",
+        }
+        with receipt_path.open("rb") as receipt_file:
+            response = await erp_client.post(
+                f"{ERP_BASE_PATH}.deposit_controller.record_deposit_payment",
+                data=form_data,
+                files={
+                    "receipt": (
+                        receipt_path.name,
+                        receipt_file,
+                        content_type,
+                    )
+                },
+                timeout=ERP_TIMEOUT_SECONDS,
+            )
+    else:
+        response = await erp_client.post(
+            f"{ERP_BASE_PATH}.deposit_controller.record_deposit_payment",
+            json={
+                "ticket_id": ticket_id,
+                "amount": amount,
+                "verification_method": "OCR",
+                "ocr_payload": ocr_payload,
+            },
+            timeout=ERP_TIMEOUT_SECONDS,
+        )
 
     if response.is_error:
         error_msg = extract_erp_error(response.json())

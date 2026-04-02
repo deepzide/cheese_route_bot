@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from datetime import date
 from typing import Any
 
 from pydantic_ai import ModelRetry, RunContext
@@ -34,6 +35,7 @@ async def create_pending_reservation(
     experience_id: str,
     slot_id: str,
     party_size: int,
+    selected_date: str,
 ) -> PendingTicket | str:
     """Create a PENDING ticket reservation for an experience slot.
 
@@ -46,18 +48,27 @@ async def create_pending_reservation(
         experience_id: ERP id of the experience to book.
         slot_id: ERP id of the slot to reserve.
         party_size: Number of people in the group.
+        selected_date: Reservation date in YYYY-MM-DD format.
     """
     logger.info(
-        "[create_pending_reservation] contact_id=%s experience_id=%s slot_id=%s party_size=%s",
+        "[create_pending_reservation] contact_id=%s experience_id=%s slot_id=%s party_size=%s selected_date=%s",
         ctx.deps.contact_id,
         experience_id,
         slot_id,
         party_size,
+        selected_date,
     )
     if not ctx.deps.contact_id:
         raise ValueError("contact_id is required in AgentDeps to create a reservation")
     if not ctx.deps.user_name:
         return "Antes de crear la reserva necesito el nombre del cliente. Pídele su nombre al usuario y llama a update_contact con el valor obtenido."
+    try:
+        date.fromisoformat(selected_date)
+    except ValueError as error:
+        raise ModelRetry(
+            "selected_date es obligatorio y debe estar en formato YYYY-MM-DD. "
+            "Usa la fecha exacta del slot seleccionado antes de volver a llamar a create_pending_reservation."
+        ) from error
 
     response = await ctx.deps.erp_client.post(
         f"{ERP_BASE_PATH}.ticket_controller.create_pending_reservation",
@@ -66,6 +77,7 @@ async def create_pending_reservation(
             "experience_id": experience_id,
             "slot_id": slot_id,
             "party_size": party_size,
+            "selected_date": selected_date,
         },
         timeout=ERP_TIMEOUT_SECONDS,
     )

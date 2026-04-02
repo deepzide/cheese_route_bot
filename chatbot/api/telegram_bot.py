@@ -249,6 +249,7 @@ async def _complete_payment(
             ticket_id=ticket_id,
             amount=amount,
             ocr_payload=ocr_payload,
+            receipt_file_path=file_path,
         )
     except ValueError as exc:
         user_msg = erp_validation_user_message(exc)

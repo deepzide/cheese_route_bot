@@ -6,7 +6,7 @@ import logging
 from datetime import date
 from typing import Any
 
-from pydantic_ai import RunContext
+from pydantic_ai import ModelRetry, RunContext
 
 from chatbot.ai_agent.dependencies import AgentDeps
 from chatbot.ai_agent.models import (
@@ -14,6 +14,7 @@ from chatbot.ai_agent.models import (
     ComplaintIncidentType,
     ComplaintResult,
     ComplaintType,
+    ReservationStatus,
     SurveyResult,
 )
 from chatbot.ai_agent.tools.erp_utils import extract_erp_data
@@ -124,7 +125,10 @@ async def submit_survey(
         rating,
     )
     if not 1 <= rating <= 5:
-        raise ValueError(f"rating must be between 1 and 5, got {rating}")
+        raise ModelRetry(
+            f"rating must be between 1 and 5, got {rating}. "
+            "Pídele al usuario una puntuación válida entre 1 y 5 antes de reenviar la encuesta."
+        )
 
     # Validate that the reservation date is not in the future
     status_response = await ctx.deps.erp_client.post(
@@ -135,13 +139,23 @@ async def submit_survey(
     status_response.raise_for_status()
     status_data: dict[str, Any] = extract_erp_data(status_response.json())
 
+    reservation_status = (status_data.get("status") or "").strip().lower()
+    if reservation_status != ReservationStatus.COMPLETED.value:
+        raise ModelRetry(
+            f"Cannot submit a survey for a reservation that is not completed yet "
+            f"(ticket_id={ticket_id}, status={status_data.get('status')}). "
+            "Explícale al usuario que solo se pueden registrar encuestas de reservas completadas "
+            "y pídele otro ticket si corresponde."
+        )
+
     slot_date_str: str | None = (status_data.get("slot") or {}).get("date")
     if slot_date_str:
         slot_date = date.fromisoformat(slot_date_str)
         if slot_date > date.today():
-            raise ValueError(
+            raise ModelRetry(
                 f"Cannot submit a survey for a reservation that has not taken place yet "
-                f"(ticket_id={ticket_id}, scheduled_date={slot_date_str})"
+                f"(ticket_id={ticket_id}, scheduled_date={slot_date_str}). "
+                "Indícale al usuario que espere a completar la experiencia antes de enviar la encuesta."
             )
 
     payload: dict[str, Any] = {

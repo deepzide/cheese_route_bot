@@ -54,7 +54,8 @@ class ParsedMessage:
     """Result of parsing an incoming webhook message.
 
     For text/audio messages, ``text`` is set and ``receipt`` is None.
-    For image/PDF messages with ticket in caption, ``receipt`` and ``ticket_id`` are set.
+    For image/PDF messages with ticket in caption, ``receipt``, ``ticket_id`` and
+    ``media_file_path`` are set.
     For image/PDF messages WITHOUT ticket in caption, ``media_file_path`` and ``is_pdf``
     are set so the router can store the path and defer OCR until the ticket arrives.
     """
@@ -137,7 +138,7 @@ async def extract_message_content(webhook_data: dict) -> ParsedMessage | None:
                 message_id=message_id,
                 receipt=receipt,
                 ticket_id=ticket_id,
-                media_file_path=file_path if receipt is None else None,
+                media_file_path=file_path,
                 is_pdf=False,
             )
 
@@ -180,7 +181,7 @@ async def extract_message_content(webhook_data: dict) -> ParsedMessage | None:
                 message_id=message_id,
                 receipt=receipt,
                 ticket_id=ticket_id,
-                media_file_path=file_path if receipt is None else None,
+                media_file_path=file_path,
                 is_pdf=True,
             )
 

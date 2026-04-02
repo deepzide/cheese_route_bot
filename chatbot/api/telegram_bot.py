@@ -15,6 +15,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from dataclasses import dataclass
+from typing import Any
 
 import httpx
 from pydantic_ai.exceptions import UsageLimitExceeded
@@ -32,7 +33,9 @@ from chatbot.ai_agent import get_cheese_agent
 from chatbot.ai_agent.context import webhook_context_manager
 from chatbot.ai_agent.dependencies import AgentDeps
 from chatbot.ai_agent.error_agent import run_error_agent
+from chatbot.ai_agent.models import ERP_BASE_PATH, SurveyResult
 from chatbot.ai_agent.summary_agent import summarize_conversation
+from chatbot.ai_agent.tools.erp_utils import extract_erp_data
 from chatbot.ai_agent.tools.ocr import (
     extract_payment_receipt,
     extract_payment_receipt_from_pdf,
@@ -44,7 +47,13 @@ from chatbot.ai_agent.tools.payments import (
     validate_ticket_ownership,
 )
 from chatbot.api.utils import message_handler, telegram_commands
+from chatbot.api.utils.survey_feedback import (
+    clear_pending_survey,
+    extract_survey_feedback,
+    get_pending_survey,
+)
 from chatbot.api.utils.telegram_commands import (
+    cmd_activity_completed,
     cmd_cancel_reservation,
     cmd_get_availability,
     cmd_get_establishment_details,
@@ -83,6 +92,7 @@ from chatbot.reminders.lead_followup import CHANNEL_MARKERS, CHANNEL_TELEGRAM
 logger = logging.getLogger(__name__)
 
 HISTORY_SUMMARY_THRESHOLD: int = 30
+ERP_TIMEOUT_SECONDS: float = 15.0
 
 # ---------------------------------------------------------------------------
 # ERP client — created in post_init, closed in post_shutdown
@@ -277,6 +287,83 @@ async def _complete_payment(
             f"Monto restante: {result.amount_remaining}"
         )
     await message.reply_text(reply, do_quote=True)
+
+
+async def _handle_pending_survey_response(
+    chat_id: str,
+    incoming_msg: str,
+    message: Message,
+) -> bool:
+    """Procesa la próxima respuesta si el chat tiene una encuesta pendiente."""
+    pending_survey = get_pending_survey(chat_id)
+    if pending_survey is None:
+        return False
+
+    feedback = extract_survey_feedback(incoming_msg)
+    if feedback is None:
+        logger.info(
+            "[survey] Message for telegram_id=%s did not look like survey feedback; releasing to main agent",
+            chat_id,
+        )
+        clear_pending_survey(chat_id)
+        return False
+
+    await message_handler.save_user_msg(chat_id, incoming_msg)
+
+    payload: dict[str, Any] = {
+        "ticket_id": pending_survey.ticket_id,
+        "rating": feedback.rating,
+    }
+    if feedback.comment:
+        payload["comment"] = feedback.comment
+
+    assert erp_client is not None, "ERP client not initialized"
+    try:
+        response = await erp_client.post(
+            f"{ERP_BASE_PATH}.survey_controller.submit_survey_response",
+            json=payload,
+            timeout=ERP_TIMEOUT_SECONDS,
+        )
+        response.raise_for_status()
+        data = extract_erp_data(response.json())
+        result = SurveyResult.model_validate(data)
+    except Exception as exc:
+        clear_pending_survey(chat_id)
+        logger.error(
+            "[survey] Failed to submit survey for telegram_id=%s ticket=%s: %s",
+            chat_id,
+            pending_survey.ticket_id,
+            exc,
+            exc_info=True,
+        )
+        await notify_error(
+            exc,
+            context=(
+                f"telegram_bot._handle_pending_survey_response | chat_id={chat_id} | ticket={pending_survey.ticket_id}"
+            ),
+        )
+        error_message = (
+            "Gracias por tu opinión. Tuvimos un problema al registrarla en el sistema, "
+            "pero ya avisamos al equipo para revisarlo."
+        )
+        await message_handler.save_assistant_msg(chat_id, error_message, [])
+        await message.reply_text(error_message, do_quote=True)
+        return True
+
+    clear_pending_survey(chat_id)
+    thanks_message = (
+        f"Gracias por tu opinión. Registramos tu valoración de {result.rating}/5"
+        f" para el ticket {result.ticket_id}."
+    )
+    await message_handler.save_assistant_msg(chat_id, thanks_message, [])
+    await message.reply_text(thanks_message, do_quote=True)
+    logger.info(
+        "[survey] Survey stored for telegram_id=%s ticket=%s rating=%s",
+        chat_id,
+        result.ticket_id,
+        result.rating,
+    )
+    return True
 
 
 # ---------------------------------------------------------------------------
@@ -518,6 +605,13 @@ async def _handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
                 "(con código de país, ej: +59899000000):",
                 do_quote=True,
             )
+            return
+
+        if await _handle_pending_survey_response(
+            chat_id=chat_id,
+            incoming_msg=incoming_msg,
+            message=update.message,
+        ):
             return
 
         # ------------------------------------------------------------------
@@ -798,6 +892,7 @@ def build_application() -> Application:
     )
     app.add_handler(CommandHandler("get_itinerary", cmd_get_itinerary))
     app.add_handler(CommandHandler("cancel_reservation", cmd_cancel_reservation))
+    app.add_handler(CommandHandler("activity_completed", cmd_activity_completed))
     app.add_handler(
         CommandHandler("list_available_experiences", cmd_list_available_experiences)
     )

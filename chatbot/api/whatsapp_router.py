@@ -4,6 +4,7 @@ import time
 import traceback
 from dataclasses import dataclass
 from datetime import datetime
+from typing import Any
 
 import httpx
 from dotenv import load_dotenv
@@ -17,7 +18,9 @@ from chatbot.ai_agent import get_cheese_agent
 from chatbot.ai_agent.context import webhook_context_manager
 from chatbot.ai_agent.dependencies import AgentDeps
 from chatbot.ai_agent.error_agent import run_error_agent
+from chatbot.ai_agent.models import ERP_BASE_PATH, SurveyResult
 from chatbot.ai_agent.summary_agent import summarize_conversation
+from chatbot.ai_agent.tools.erp_utils import extract_erp_data
 from chatbot.ai_agent.tools.ocr import (
     extract_payment_receipt,
     extract_payment_receipt_from_pdf,
@@ -30,6 +33,11 @@ from chatbot.ai_agent.tools.payments import (
 )
 from chatbot.api.utils import message_handler
 from chatbot.api.utils.message_queue import Message, message_queue
+from chatbot.api.utils.survey_feedback import (
+    clear_pending_survey,
+    extract_survey_feedback,
+    get_pending_survey,
+)
 from chatbot.api.utils.text import strip_markdown
 from chatbot.api.utils.webhook_parser import (
     _TICKET_ID_RE,
@@ -68,6 +76,7 @@ _pending_receipt: dict[str, _PendingReceipt] = {}
 
 SLOW_RESPONSE_THRESHOLD: float = 30.0
 HISTORY_SUMMARY_THRESHOLD: int = 30
+ERP_TIMEOUT_SECONDS: float = 15.0
 
 
 async def _maybe_compress_history(user_number: str, history_len: int) -> None:
@@ -338,6 +347,90 @@ async def _register_and_notify_payment(
         )
 
 
+async def _handle_pending_survey_response(
+    user_number: str,
+    incoming_msg: str,
+    message_id: str,
+) -> bool:
+    """Procesa la próxima respuesta del usuario si hay una encuesta de satisfacción pendiente."""
+    pending_survey = get_pending_survey(user_number)
+    if pending_survey is None:
+        return False
+
+    feedback = extract_survey_feedback(incoming_msg)
+    if feedback is None:
+        logger.info(
+            "[survey] Message for user=%s did not look like survey feedback; releasing to main agent",
+            user_number,
+        )
+        clear_pending_survey(user_number)
+        return False
+
+    await message_handler.save_user_msg(user_number, incoming_msg)
+
+    payload: dict[str, Any] = {
+        "ticket_id": pending_survey.ticket_id,
+        "rating": feedback.rating,
+    }
+    if feedback.comment:
+        payload["comment"] = feedback.comment
+
+    try:
+        response = await erp_client.post(
+            f"{ERP_BASE_PATH}.survey_controller.submit_survey_response",
+            json=payload,
+            timeout=ERP_TIMEOUT_SECONDS,
+        )
+        response.raise_for_status()
+        data = extract_erp_data(response.json())
+        result = SurveyResult.model_validate(data)
+    except Exception as exc:
+        clear_pending_survey(user_number)
+        logger.error(
+            "[survey] Failed to submit survey for user=%s ticket=%s: %s",
+            user_number,
+            pending_survey.ticket_id,
+            exc,
+            exc_info=True,
+        )
+        await notify_error(
+            exc,
+            context=(
+                f"_handle_pending_survey_response | user={user_number} | ticket={pending_survey.ticket_id}"
+            ),
+        )
+        error_message = (
+            "Gracias por tu opinión. Tuvimos un problema al registrarla en el sistema, "
+            "pero ya avisamos al equipo para revisarlo."
+        )
+        await message_handler.save_assistant_msg(user_number, error_message, [])
+        await whatsapp_manager.send_text(
+            user_number=user_number,
+            text=error_message,
+            message_id=message_id,
+        )
+        return True
+
+    clear_pending_survey(user_number)
+    thanks_message = (
+        f"Gracias por tu opinión. Registramos tu valoración de {result.rating}/5"
+        f" para el ticket {result.ticket_id}."
+    )
+    await message_handler.save_assistant_msg(user_number, thanks_message, [])
+    await whatsapp_manager.send_text(
+        user_number=user_number,
+        text=thanks_message,
+        message_id=message_id,
+    )
+    logger.info(
+        "[survey] Survey stored for user=%s ticket=%s rating=%s",
+        user_number,
+        result.ticket_id,
+        result.rating,
+    )
+    return True
+
+
 async def _process_message(message: Message) -> None:
     """Process a single message from the queue sequentially per user."""
     user_number = message.user_number
@@ -350,6 +443,13 @@ async def _process_message(message: Message) -> None:
 
     await whatsapp_manager.mark_read(message_id)
     await whatsapp_manager.send_typing_indicator(message_id)
+
+    if await _handle_pending_survey_response(
+        user_number=user_number,
+        incoming_msg=incoming_msg,
+        message_id=message_id,
+    ):
+        return
 
     # ------------------------------------------------------------------
     # Pending payment receipt — waiting for ticket ID from the user

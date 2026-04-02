@@ -22,6 +22,7 @@ Commands registered:
   /get_route_booking_status       <route_booking_id>
   /get_itinerary
   /cancel_reservation             <ticket_id>
+  /activity_completed             <contact_id> <experience_id> <slot_id> <ticket_id>
   /stop_followups
   /start_followups
 """
@@ -43,6 +44,7 @@ from telegram.ext import ContextTypes
 from chatbot.ai_agent.context import webhook_context_manager
 from chatbot.ai_agent.dependencies import AgentDeps
 from chatbot.ai_agent.instructions import resolve_or_create_contact
+from chatbot.ai_agent.models import ERPSurveyRequest
 from chatbot.ai_agent.tools.booking import (
     cancel_reservation,
     get_customer_itinerary,
@@ -66,6 +68,7 @@ from chatbot.ai_agent.tools.notifications import (
     start_lead_followups,
     stop_lead_followups,
 )
+from chatbot.api.erp_router import trigger_activity_completed_survey
 from chatbot.db.services import services
 from chatbot.messaging.telegram_notifier import notify_error
 from chatbot.messaging.whatsapp import WhatsAppManager
@@ -778,6 +781,56 @@ async def cmd_cancel_reservation(
         result = await cancel_reservation(ctx, reservation_id=ticket_id, confirmed=True)
     except Exception as exc:
         await _send_error(update, exc, f"cmd_cancel_reservation id={ticket_id}")
+        return
+
+    await update.message.reply_text(_to_json_block(result), parse_mode="Markdown")
+
+
+# ---------------------------------------------------------------------------
+# /activity_completed <contact_id> <experience_id> <slot_id> <ticket_id>
+# ---------------------------------------------------------------------------
+
+
+async def cmd_activity_completed(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> None:
+    """/activity_completed <contact_id> <experience_id> <slot_id> <ticket_id> — dispara manualmente el flujo de encuesta post-actividad."""
+    if not update.message or not update.effective_chat:
+        return
+
+    args: list[str] = context.args or []
+    if len(args) != 4:  # noqa: PLR2004
+        await update.message.reply_text(
+            "Uso: `/activity_completed <contact_id> <experience_id> <slot_id> <ticket_id>`\n"
+            "Ejemplo: `/activity_completed CNT-001 EXP-001 SLOT-001 TKT-2026-03-00018`",
+            parse_mode="Markdown",
+        )
+        return
+
+    request = ERPSurveyRequest(
+        contact_id=args[0],
+        experience_id=args[1],
+        slot_id=args[2],
+        ticket_id=args[3],
+    )
+
+    try:
+        result = await trigger_activity_completed_survey(
+            request,
+            channel="telegram",
+            telegram_chat_id=str(update.effective_chat.id),
+        )
+    except Exception as exc:
+        await _send_error(
+            update,
+            exc,
+            (
+                "cmd_activity_completed "
+                f"contact_id={request.contact_id} "
+                f"experience_id={request.experience_id} "
+                f"slot_id={request.slot_id} ticket_id={request.ticket_id}"
+            ),
+        )
         return
 
     await update.message.reply_text(_to_json_block(result), parse_mode="Markdown")

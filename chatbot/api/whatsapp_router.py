@@ -12,10 +12,11 @@ from fastapi import APIRouter, BackgroundTasks, HTTPException, Request
 from fastapi.responses import PlainTextResponse
 from pydantic import ValidationError
 from pydantic_ai import AgentRunResult
-from pydantic_ai.exceptions import ModelAPIError, UsageLimitExceeded
+from pydantic_ai.exceptions import ModelAPIError, ModelHTTPError, UsageLimitExceeded
 from pydantic_ai.messages import ModelResponse, ToolCallPart
 
 from chatbot.ai_agent import get_cheese_agent
+from chatbot.ai_agent.agent import FALLBACK_MODEL
 from chatbot.ai_agent.context import webhook_context_manager
 from chatbot.ai_agent.dependencies import AgentDeps
 from chatbot.ai_agent.error_agent import run_error_agent
@@ -557,9 +558,24 @@ async def _process_message(message: Message) -> None:
                     provider_exc,
                 )
                 provider_error = f"{type(provider_exc).__name__}: {provider_exc}"
-                result = await agent.run(
-                    incoming_msg, deps=deps, message_history=history
-                )
+                if (
+                    isinstance(provider_exc, ModelHTTPError)
+                    and provider_exc.status_code == 503
+                ):
+                    logger.info(
+                        "[fallback] 503 on primary model — switching to %s",
+                        FALLBACK_MODEL,
+                    )
+                    result = await agent.run(
+                        incoming_msg,
+                        deps=deps,
+                        message_history=history,
+                        model=FALLBACK_MODEL,
+                    )
+                else:
+                    result = await agent.run(
+                        incoming_msg, deps=deps, message_history=history
+                    )
             except UsageLimitExceeded as ule:
                 logger.warning(
                     "UsageLimitExceeded for %s: %s. Summarizing history and retrying...",

@@ -19,7 +19,7 @@ from typing import Any
 
 import httpx
 from pydantic import ValidationError
-from pydantic_ai.exceptions import UsageLimitExceeded
+from pydantic_ai.exceptions import ModelHTTPError, UsageLimitExceeded
 from telegram import Message, Update
 from telegram.constants import ChatAction
 from telegram.error import TelegramError
@@ -32,6 +32,7 @@ from telegram.ext import (
 )
 
 from chatbot.ai_agent import get_cheese_agent
+from chatbot.ai_agent.agent import FALLBACK_MODEL
 from chatbot.ai_agent.context import webhook_context_manager
 from chatbot.ai_agent.dependencies import AgentDeps
 from chatbot.ai_agent.error_agent import run_error_agent
@@ -743,9 +744,25 @@ async def _handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             agent = get_cheese_agent()
             history = await services.get_pydantic_ai_history(chat_id, hours=24)
             try:
-                result = await agent.run(
-                    incoming_msg, deps=deps, message_history=history
-                )
+                try:
+                    result = await agent.run(
+                        incoming_msg, deps=deps, message_history=history
+                    )
+                except ModelHTTPError as http_exc:
+                    if http_exc.status_code == 503:
+                        logger.warning(
+                            "[fallback] 503 on primary model for telegram_id=%s — switching to %s",
+                            chat_id,
+                            FALLBACK_MODEL,
+                        )
+                        result = await agent.run(
+                            incoming_msg,
+                            deps=deps,
+                            message_history=history,
+                            model=FALLBACK_MODEL,
+                        )
+                    else:
+                        raise
                 ai_response: str = strip_markdown(result.output)
                 tools_used = _extract_tools_used(result)
             except UsageLimitExceeded as ule:

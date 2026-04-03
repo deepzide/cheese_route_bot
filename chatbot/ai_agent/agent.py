@@ -49,7 +49,7 @@ logger = logging.getLogger(__name__)
 ERP_TIMEOUT_SECONDS = 15.0
 
 PROMPT_FILE: Path = Path("static/prompt.txt")
-FALLBACK_MODEL: str = GoogleModel.Gemini_Flash_Latest
+FALLBACK_MODEL: str = GoogleModel.Gemini_3_Flash_Preview
 
 
 def _load_system_prompt() -> str:

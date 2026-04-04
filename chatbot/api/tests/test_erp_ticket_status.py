@@ -171,6 +171,9 @@ async def test_notify_ticket_status_completed_triggers_survey(monkeypatch) -> No
         assert ticket_id == body.ticket_id
         return ticket
 
+    async def fake_get_messages(phone: str) -> list:
+        return []
+
     async def fake_get_last_user_message(phone: str) -> DummyMessage:
         assert phone == contact.phone
         return DummyMessage()
@@ -191,6 +194,7 @@ async def test_notify_ticket_status_completed_triggers_survey(monkeypatch) -> No
     monkeypatch.setattr(
         erp_router, "_get_reservation_status", fake_get_reservation_status
     )
+    monkeypatch.setattr(erp_router.services, "get_messages", fake_get_messages)
     monkeypatch.setattr(
         erp_router.services,
         "get_last_user_message",
@@ -211,3 +215,200 @@ async def test_notify_ticket_status_completed_triggers_survey(monkeypatch) -> No
     assert saved_messages == [(contact.phone, erp_router.SURVEY_MESSAGE, [])]
     assert len(pending_surveys) == 1
     assert pending_surveys[0][0] == contact.phone
+
+
+# uv run pytest -s chatbot/api/tests/test_erp_ticket_status.py::test_notify_ticket_status_whatsapp_sends_message
+@pytest.mark.asyncio
+async def test_notify_ticket_status_whatsapp_sends_message(monkeypatch) -> None:
+    body = ERPTicketStatusRequest(
+        contact_id="CONTACT-1",
+        ticket_id="TICKET-1",
+        new_status="Cancelled",
+    )
+    contact = ContactInfo(contact_id="CONTACT-1", phone="+59899000000")
+    ticket = ReservationStatusDetail(
+        ticket_id="TICKET-1",
+        status="CANCELLED",
+        contact=ReservationContactDetail(contact_id="CONTACT-1"),
+    )
+    sent_messages: list[tuple[str, str]] = []
+
+    class DummyLastMsg:
+        created_at = datetime.now(UTC).replace(tzinfo=None)
+
+    async def fake_get_contact_by_id(contact_id: str) -> ContactInfo:
+        return contact
+
+    async def fake_get_reservation_status(ticket_id: str) -> ReservationStatusDetail:
+        return ticket
+
+    async def fake_get_messages(phone: str) -> list:
+        return []
+
+    async def fake_get_last_user_message(phone: str) -> DummyLastMsg:
+        return DummyLastMsg()
+
+    async def fake_send_text(*, user_number: str, text: str) -> bool:
+        sent_messages.append((user_number, text))
+        return True
+
+    monkeypatch.setattr(erp_router, "_get_contact_by_id", fake_get_contact_by_id)
+    monkeypatch.setattr(
+        erp_router, "_get_reservation_status", fake_get_reservation_status
+    )
+    monkeypatch.setattr(erp_router.services, "get_messages", fake_get_messages)
+    monkeypatch.setattr(
+        erp_router.services, "get_last_user_message", fake_get_last_user_message
+    )
+    monkeypatch.setattr(erp_router.whatsapp_manager, "send_text", fake_send_text)
+
+    result = await erp_router.notify_ticket_status(body)
+
+    assert result == {"status": "ok", "phone": contact.phone}
+    assert len(sent_messages) == 1
+    assert sent_messages[0][0] == contact.phone
+    assert "cancelled" in sent_messages[0][1].lower()
+
+
+# uv run pytest -s chatbot/api/tests/test_erp_ticket_status.py::test_notify_ticket_status_whatsapp_window_expired_raises
+@pytest.mark.asyncio
+async def test_notify_ticket_status_whatsapp_window_expired_raises(monkeypatch) -> None:
+    from datetime import timedelta
+
+    body = ERPTicketStatusRequest(
+        contact_id="CONTACT-1",
+        ticket_id="TICKET-1",
+        new_status="Rejected",
+    )
+    contact = ContactInfo(contact_id="CONTACT-1", phone="+59899000000")
+    ticket = ReservationStatusDetail(
+        ticket_id="TICKET-1",
+        status="REJECTED",
+        contact=ReservationContactDetail(contact_id="CONTACT-1"),
+    )
+
+    class OldMsg:
+        created_at = (datetime.now(UTC) - timedelta(hours=25)).replace(tzinfo=None)
+
+    async def fake_get_contact_by_id(contact_id: str) -> ContactInfo:
+        return contact
+
+    async def fake_get_reservation_status(ticket_id: str) -> ReservationStatusDetail:
+        return ticket
+
+    async def fake_get_messages(phone: str) -> list:
+        return []
+
+    async def fake_get_last_user_message(phone: str) -> OldMsg:
+        return OldMsg()
+
+    monkeypatch.setattr(erp_router, "_get_contact_by_id", fake_get_contact_by_id)
+    monkeypatch.setattr(
+        erp_router, "_get_reservation_status", fake_get_reservation_status
+    )
+    monkeypatch.setattr(erp_router.services, "get_messages", fake_get_messages)
+    monkeypatch.setattr(
+        erp_router.services, "get_last_user_message", fake_get_last_user_message
+    )
+
+    try:
+        await erp_router.notify_ticket_status(body)
+    except HTTPException as exc:
+        assert exc.status_code == 422
+        assert "24h" in exc.detail or "expirado" in exc.detail
+    else:
+        raise AssertionError(
+            "Se esperaba HTTPException cuando la ventana de 24h expiró"
+        )
+
+
+# uv run pytest -s chatbot/api/tests/test_erp_ticket_status.py::test_notify_ticket_status_whatsapp_no_messages_raises
+@pytest.mark.asyncio
+async def test_notify_ticket_status_whatsapp_no_messages_raises(monkeypatch) -> None:
+    body = ERPTicketStatusRequest(
+        contact_id="CONTACT-1",
+        ticket_id="TICKET-1",
+        new_status="Expired",
+    )
+    contact = ContactInfo(contact_id="CONTACT-1", phone="+59899000000")
+    ticket = ReservationStatusDetail(
+        ticket_id="TICKET-1",
+        status="EXPIRED",
+        contact=ReservationContactDetail(contact_id="CONTACT-1"),
+    )
+
+    async def fake_get_contact_by_id(contact_id: str) -> ContactInfo:
+        return contact
+
+    async def fake_get_reservation_status(ticket_id: str) -> ReservationStatusDetail:
+        return ticket
+
+    async def fake_get_messages(phone: str) -> list:
+        return []
+
+    async def fake_get_last_user_message(phone: str) -> None:
+        return None
+
+    monkeypatch.setattr(erp_router, "_get_contact_by_id", fake_get_contact_by_id)
+    monkeypatch.setattr(
+        erp_router, "_get_reservation_status", fake_get_reservation_status
+    )
+    monkeypatch.setattr(erp_router.services, "get_messages", fake_get_messages)
+    monkeypatch.setattr(
+        erp_router.services, "get_last_user_message", fake_get_last_user_message
+    )
+
+    try:
+        await erp_router.notify_ticket_status(body)
+    except HTTPException as exc:
+        assert exc.status_code == 422
+        assert "ventana" in exc.detail or "mensajes" in exc.detail
+    else:
+        raise AssertionError(
+            "Se esperaba HTTPException cuando no hay mensajes del usuario"
+        )
+
+
+# uv run pytest -s chatbot/api/tests/test_erp_ticket_status.py::test_notify_ticket_status_telegram_sends_message
+@pytest.mark.asyncio
+async def test_notify_ticket_status_telegram_sends_message(monkeypatch) -> None:
+    telegram_chat_id = "-100123456789"
+    body = ERPTicketStatusRequest(
+        contact_id="CONTACT-TG-1",
+        ticket_id="TICKET-1",
+        new_status="Rejected",
+    )
+    contact = ContactInfo(contact_id="CONTACT-TG-1", phone=telegram_chat_id)
+    ticket = ReservationStatusDetail(
+        ticket_id="TICKET-1",
+        status="REJECTED",
+        contact=ReservationContactDetail(contact_id="CONTACT-TG-1"),
+    )
+    telegram_sent: list[tuple[str, str]] = []
+
+    async def fake_get_contact_by_id(contact_id: str) -> ContactInfo:
+        return contact
+
+    async def fake_get_reservation_status(ticket_id: str) -> ReservationStatusDetail:
+        return ticket
+
+    async def fake_get_messages(phone: str) -> list:
+        return []
+
+    async def fake_send_telegram(*, chat_id: str, text: str) -> bool:
+        telegram_sent.append((chat_id, text))
+        return True
+
+    monkeypatch.setattr(erp_router, "_get_contact_by_id", fake_get_contact_by_id)
+    monkeypatch.setattr(
+        erp_router, "_get_reservation_status", fake_get_reservation_status
+    )
+    monkeypatch.setattr(erp_router.services, "get_messages", fake_get_messages)
+    monkeypatch.setattr(erp_router, "send_telegram", fake_send_telegram)
+
+    result = await erp_router.notify_ticket_status(body)
+
+    assert result == {"status": "ok", "chat_id": telegram_chat_id}
+    assert len(telegram_sent) == 1
+    assert telegram_sent[0][0] == telegram_chat_id
+    assert "rejected" in telegram_sent[0][1].lower()

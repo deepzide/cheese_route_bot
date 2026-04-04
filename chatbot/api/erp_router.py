@@ -29,6 +29,7 @@ from chatbot.db.services import services
 from chatbot.messaging.telegram_notifier import notify_error
 from chatbot.messaging.telegram_notifier import send_message as send_telegram
 from chatbot.messaging.whatsapp import whatsapp_manager
+from chatbot.reminders.lead_followup import CHANNEL_TELEGRAM, infer_channel
 
 logger = logging.getLogger(__name__)
 router = APIRouter(dependencies=[Depends(get_api_key)])
@@ -678,17 +679,66 @@ async def notify_ticket_status(body: ERPTicketStatusRequest) -> dict[str, str]:
 
     phone = contact.phone
 
+    # 2. Inferir canal de comunicación del contacto
+    messages = await services.get_messages(phone)
+    channel = infer_channel(conversation_id=phone, messages=messages)
+
     if body.new_status == TicketDecision.COMPLETED:
         survey_request = _build_activity_completed_request(body.contact_id, ticket)
         return await _dispatch_activity_completed_survey(
             survey_request,
             contact,
             ticket,
-            channel="whatsapp",
+            channel=channel,
+            telegram_chat_id=phone if channel == CHANNEL_TELEGRAM else None,
         )
 
-    # 2. Construir y enviar el mensaje
+    # 3. Construir el mensaje
     message = _build_ticket_message(body.new_status, body.ticket_id, body.observations)
+
+    if channel == CHANNEL_TELEGRAM:
+        ok = await send_telegram(chat_id=phone, text=message)
+        if not ok:
+            logger.error("[ticket-status] Error enviando Telegram a %s", phone)
+            await notify_error(
+                Exception(
+                    f"Error al enviar notificación de ticket {body.ticket_id} a Telegram {phone}"
+                ),
+                context=f"notify_ticket_status | contact_id={body.contact_id}",
+            )
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail=f"Error al enviar el mensaje de Telegram al chat {phone}",
+            )
+
+        logger.info(
+            "[ticket-status] Notificación enviada por Telegram a %s (ticket=%s status=%s)",
+            phone,
+            body.ticket_id,
+            body.new_status,
+        )
+        return {"status": "ok", "chat_id": phone}
+
+    # Canal WhatsApp: verificar ventana de 24h de META
+    last_msg = await services.get_last_user_message(phone)
+    if last_msg is None:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=(
+                f"No hay mensajes del usuario {phone} en la base de datos. "
+                "La ventana de 24h de META no está activa."
+            ),
+        )
+
+    if not _is_within_whatsapp_window(last_msg.created_at):  # type: ignore[attr-defined]
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=(
+                f"La ventana de mensajes gratuitos de 24h de META para {phone} ha expirado. "
+                "El último mensaje del usuario fue hace más de 24 horas."
+            ),
+        )
+
     ok = await whatsapp_manager.send_text(user_number=phone, text=message)
     if not ok:
         logger.error("[ticket-status] Error enviando WhatsApp a %s", phone)
@@ -704,7 +754,7 @@ async def notify_ticket_status(body: ERPTicketStatusRequest) -> dict[str, str]:
         )
 
     logger.info(
-        "[ticket-status] Notificación enviada a %s (ticket=%s status=%s)",
+        "[ticket-status] Notificación enviada por WhatsApp a %s (ticket=%s status=%s)",
         phone,
         body.ticket_id,
         body.new_status,

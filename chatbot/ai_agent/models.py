@@ -591,12 +591,23 @@ class EstablishmentExperience(BaseModel):
     route_price: float | None = None
 
 
+class BankAccount(BaseModel):
+    """Bank account entry returned inside EstablishmentDetail."""
+
+    bank_account_id: str | None = None
+    account_number: str | None = None
+    bank_name: str | None = None
+    currency: str | None = None
+    holder: str | None = None
+    iban: str | None = None
+
+
 class EstablishmentDetail(BaseModel):
     """Full establishment detail from establishment_controller.get_establishment_details.
 
     ERP response fields: company_id, company_name, status, email, phone,
     website, description, address, contacts, experiences,
-    tickets_by_status, logo, documents, photos, links, pdfs.
+    tickets_by_status, logo, documents, photos, links, pdfs, bank_account.
     """
 
     establishment_id: str
@@ -615,6 +626,7 @@ class EstablishmentDetail(BaseModel):
     photos: list[Any] = Field(default_factory=list)
     links: list[Any] = Field(default_factory=list)
     pdfs: list[Any] = Field(default_factory=list)
+    bank_account: list[BankAccount] = Field(default_factory=list)
 
     @model_validator(mode="before")
     @classmethod
@@ -1014,6 +1026,20 @@ class PaymentReceipt(BaseModel):
     concept: str | None = Field(
         None,
         description="Concepto o motivo del pago.",
+    )
+    bank_name: str | None = Field(
+        None,
+        description=(
+            "Nombre del banco o entidad financiera a la que se realizó el pago. "
+            "Busca etiquetas como 'Banco', 'Bank', 'Entidad', o el nombre del banco en el encabezado."
+        ),
+    )
+    currency: str | None = Field(
+        None,
+        description=(
+            "Moneda de la transacción. "
+            "Busca el código ISO de tres letras (UYU, USD, EUR, etc.) o el símbolo de moneda."
+        ),
     )
 
 

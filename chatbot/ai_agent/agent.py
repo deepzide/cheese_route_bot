@@ -47,7 +47,10 @@ from chatbot.ai_agent.tools.customer import (
 )
 from chatbot.ai_agent.tools.date_resolver import resolve_relative_date
 from chatbot.ai_agent.tools.erp_utils import extract_erp_data
-from chatbot.ai_agent.tools.notifications import stop_lead_followups
+from chatbot.ai_agent.tools.notifications import (
+    start_lead_followups,
+    stop_lead_followups,
+)
 from chatbot.ai_agent.tools.payments import get_payment_instructions
 from chatbot.ai_agent.tools.support import create_complaint, submit_survey
 
@@ -132,6 +135,7 @@ AGENT_TOOLS = [
     update_contact,
     upsert_lead,
     stop_lead_followups,
+    start_lead_followups,
     # Reservations
     create_pending_reservation,
     get_reservation_status,

@@ -694,6 +694,7 @@ async def notify_ticket_status(body: ERPTicketStatusRequest) -> dict[str, str]:
     _validate_ticket_status_payload(body=body, contact=contact, ticket=ticket)
 
     # Validar que la fecha del ticket no esté en el pasado (solo para confirmaciones)
+    slot_date: date | None = None
     if body.new_status == TicketDecision.APPROVED:
         slot_date_str = ticket.slot.date if ticket.slot else None
         if slot_date_str:
@@ -766,7 +767,7 @@ async def notify_ticket_status(body: ERPTicketStatusRequest) -> dict[str, str]:
                 phone=phone, ticket_id=body.ticket_id, channel=CHANNEL_TELEGRAM
             )
             await services.register_confirmed_ticket(
-                ticket_id=body.ticket_id, phone=phone
+                ticket_id=body.ticket_id, phone=phone, ticket_date=slot_date
             )
 
         return {"status": "ok", "chat_id": phone}
@@ -808,7 +809,9 @@ async def notify_ticket_status(body: ERPTicketStatusRequest) -> dict[str, str]:
     # so the customer knows how much to pay and where.
     if body.new_status == TicketDecision.APPROVED:
         await _send_payment_instructions(phone=phone, ticket_id=body.ticket_id)
-        await services.register_confirmed_ticket(ticket_id=body.ticket_id, phone=phone)
+        await services.register_confirmed_ticket(
+            ticket_id=body.ticket_id, phone=phone, ticket_date=slot_date
+        )
 
     return {"status": "ok", "phone": phone}
 

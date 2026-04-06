@@ -718,6 +718,12 @@ async def notify_ticket_status(body: ERPTicketStatusRequest) -> dict[str, str]:
 
     # 2. Inferir canal de comunicación del contacto
     messages = await services.get_messages(phone)
+    if not messages:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=(f"No hay historial de mensajes del usuario {phone} con el bot"),
+        )
+
     channel = infer_channel(conversation_id=phone, messages=messages)
 
     if body.new_status == TicketDecision.COMPLETED:
@@ -767,14 +773,6 @@ async def notify_ticket_status(body: ERPTicketStatusRequest) -> dict[str, str]:
 
     # Canal WhatsApp: verificar ventana de 24h de META
     last_msg = await services.get_last_user_message(phone)
-    if last_msg is None:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-            detail=(
-                f"No hay mensajes del usuario {phone} en la base de datos. "
-                "La ventana de 24h de META no está activa."
-            ),
-        )
 
     if not _is_within_whatsapp_window(last_msg.created_at):  # type: ignore[attr-defined]
         raise HTTPException(

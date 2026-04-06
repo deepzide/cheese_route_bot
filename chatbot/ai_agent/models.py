@@ -532,13 +532,38 @@ class ModificationPolicy(BaseModel):
     message: str | None = None
 
 
-class CancellationImpact(BaseModel):
-    """Penalties and consequences of a cancellation."""
+class CancellationPolicy(BaseModel):
+    """Cancellation policy details returned by the ERP."""
 
-    allowed: bool = False
+    cancel_until_hours_before: int | None = None
+
+
+class CancellationImpact(BaseModel):
+    """Penalties and consequences of a cancellation.
+
+    Maps the ERP ``pricing_controller.get_cancellation_impact`` response.
+    """
+
+    reservation_id: str | None = None
+    experience_id: str | None = None
+    can_cancel: bool = False
     penalty: float | None = None
     refund_amount: float | None = None
-    message: str | None = None
+    cancellation_policy: CancellationPolicy | None = None
+    consequences: str | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def _normalize(cls, data: Any) -> Any:
+        """Accept legacy field names used by the old model."""
+        if isinstance(data, dict):
+            # Legacy: ``allowed`` → ``can_cancel``
+            if "allowed" in data and "can_cancel" not in data:
+                data["can_cancel"] = data.pop("allowed")
+            # Legacy: ``message`` → ``consequences``
+            if "message" in data and "consequences" not in data:
+                data["consequences"] = data.pop("message")
+        return data
 
 
 # ---------------------------------------------------------------------------
@@ -770,13 +795,32 @@ class CancellationResult(BaseModel):
     slot_id: str | None = None
 
 
-class ModificationPreview(BaseModel):
-    """Preview of the impact of a reservation modification."""
+class PriceImpact(BaseModel):
+    """Price breakdown returned by ticket_controller.modify_reservation_preview."""
 
-    preview_id: str | None = None
-    changes: list[dict[str, Any]] = Field(default_factory=list)
-    price_delta: float | None = None
-    message: str | None = None
+    current_price: float | None = None
+    new_price: float | None = None
+    price_difference: float | None = None
+
+
+class ModificationPreview(BaseModel):
+    """Preview returned by ticket_controller.modify_reservation_preview.
+
+    ERP response fields: reservation_id, current_slot, current_party_size,
+    new_slot, new_slot_date, new_slot_time, slot_change_allowed,
+    new_party_size, party_size_change_allowed, price_impact.
+    """
+
+    reservation_id: str
+    current_slot: str | None = None
+    current_party_size: int | None = None
+    new_slot: str | None = None
+    new_slot_date: str | None = None
+    new_slot_time: str | None = None
+    slot_change_allowed: bool = True
+    new_party_size: int | None = None
+    party_size_change_allowed: bool = True
+    price_impact: PriceImpact | None = None
 
 
 # ---------------------------------------------------------------------------

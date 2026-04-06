@@ -26,12 +26,12 @@ def test_ticket_status_request_normalizes_hyphenated_statuses() -> None:
     checked_in_request = ERPTicketStatusRequest(
         contact_id="CONTACT-1",
         ticket_id="TICKET-1",
-        new_status="Checked-In",
+        new_status="Checked-In",  # type: ignore[arg-type]
     )
     no_show_request = ERPTicketStatusRequest(
         contact_id="CONTACT-1",
         ticket_id="TICKET-1",
-        new_status="No-Show",
+        new_status="No-Show",  # type: ignore[arg-type]
     )
 
     assert checked_in_request.new_status == TicketDecision.CHECKED_IN
@@ -43,12 +43,12 @@ def test_ticket_status_request_normalizes_completed_statuses() -> None:
     completed_request = ERPTicketStatusRequest(
         contact_id="CONTACT-1",
         ticket_id="TICKET-1",
-        new_status="Completed",
+        new_status="Completed",  # type: ignore[arg-type]
     )
     completed_es_request = ERPTicketStatusRequest(
         contact_id="CONTACT-1",
         ticket_id="TICKET-1",
-        new_status="Completado",
+        new_status="Completado",  # type: ignore[arg-type]
     )
 
     assert completed_request.new_status == TicketDecision.COMPLETED
@@ -60,7 +60,7 @@ def test_validate_ticket_status_payload_accepts_matching_contact_and_status() ->
     body = ERPTicketStatusRequest(
         contact_id="CONTACT-1",
         ticket_id="TICKET-1",
-        new_status="Cancelled",
+        new_status=TicketDecision.CANCELLED,
     )
     contact = ContactInfo(contact_id="CONTACT-1", phone="+59899000000")
     ticket = ReservationStatusDetail(
@@ -77,7 +77,7 @@ def test_validate_ticket_status_payload_rejects_ticket_from_other_contact() -> N
     body = ERPTicketStatusRequest(
         contact_id="CONTACT-1",
         ticket_id="TICKET-1",
-        new_status="Rejected",
+        new_status=TicketDecision.REJECTED,
     )
     contact = ContactInfo(contact_id="CONTACT-1", phone="+59899000000")
     ticket = ReservationStatusDetail(
@@ -146,7 +146,7 @@ async def test_notify_ticket_status_completed_triggers_survey(monkeypatch) -> No
     body = ERPTicketStatusRequest(
         contact_id="CONTACT-1",
         ticket_id="TICKET-1",
-        new_status="Completed",
+        new_status=TicketDecision.COMPLETED,
     )
     contact = ContactInfo(contact_id="CONTACT-1", phone="+59899000000")
     ticket = ReservationStatusDetail(
@@ -201,11 +201,7 @@ async def test_notify_ticket_status_completed_triggers_survey(monkeypatch) -> No
         fake_get_last_user_message,
     )
     monkeypatch.setattr(erp_router.whatsapp_manager, "send_text", fake_send_text)
-    monkeypatch.setattr(
-        erp_router.message_handler,
-        "save_assistant_msg",
-        fake_save_assistant_msg,
-    )
+    monkeypatch.setattr(erp_router, "save_msg", fake_save_assistant_msg)
     monkeypatch.setattr(erp_router, "set_pending_survey", fake_set_pending_survey)
 
     result = await erp_router.notify_ticket_status(body)
@@ -223,7 +219,7 @@ async def test_notify_ticket_status_whatsapp_sends_message(monkeypatch) -> None:
     body = ERPTicketStatusRequest(
         contact_id="CONTACT-1",
         ticket_id="TICKET-1",
-        new_status="Cancelled",
+        new_status=TicketDecision.CANCELLED,
     )
     contact = ContactInfo(contact_id="CONTACT-1", phone="+59899000000")
     ticket = ReservationStatusDetail(
@@ -278,7 +274,7 @@ async def test_notify_ticket_status_whatsapp_window_expired_raises(monkeypatch) 
     body = ERPTicketStatusRequest(
         contact_id="CONTACT-1",
         ticket_id="TICKET-1",
-        new_status="Rejected",
+        new_status=TicketDecision.REJECTED,
     )
     contact = ContactInfo(contact_id="CONTACT-1", phone="+59899000000")
     ticket = ReservationStatusDetail(
@@ -328,7 +324,7 @@ async def test_notify_ticket_status_whatsapp_no_messages_raises(monkeypatch) -> 
     body = ERPTicketStatusRequest(
         contact_id="CONTACT-1",
         ticket_id="TICKET-1",
-        new_status="Expired",
+        new_status=TicketDecision.EXPIRED,
     )
     contact = ContactInfo(contact_id="CONTACT-1", phone="+59899000000")
     ticket = ReservationStatusDetail(
@@ -376,7 +372,7 @@ async def test_notify_ticket_status_telegram_sends_message(monkeypatch) -> None:
     body = ERPTicketStatusRequest(
         contact_id="CONTACT-TG-1",
         ticket_id="TICKET-1",
-        new_status="Rejected",
+        new_status=TicketDecision.REJECTED,
     )
     contact = ContactInfo(contact_id="CONTACT-TG-1", phone=telegram_chat_id)
     ticket = ReservationStatusDetail(
@@ -412,3 +408,128 @@ async def test_notify_ticket_status_telegram_sends_message(monkeypatch) -> None:
     assert len(telegram_sent) == 1
     assert telegram_sent[0][0] == telegram_chat_id
     assert "rejected" in telegram_sent[0][1].lower()
+
+
+# uv run pytest -s chatbot/api/tests/test_erp_ticket_status.py::test_notify_ticket_status_completed_rejects_future_slot
+@pytest.mark.asyncio
+async def test_notify_ticket_status_completed_rejects_future_slot(monkeypatch) -> None:
+    """La fecha del ticket debe estar en el pasado (o ser hoy). Un slot futuro debe rechazarse."""
+    from datetime import timedelta
+
+    future_date = (date.today() + timedelta(days=1)).isoformat()
+    body = ERPTicketStatusRequest(
+        contact_id="CONTACT-1",
+        ticket_id="TICKET-1",
+        new_status=TicketDecision.COMPLETED,
+    )
+    contact = ContactInfo(contact_id="CONTACT-1", phone="+59899000000")
+    ticket = ReservationStatusDetail(
+        ticket_id="TICKET-1",
+        status="COMPLETED",
+        contact=ReservationContactDetail(contact_id="CONTACT-1"),
+        experience=ReservationExperienceDetail(experience_id="EXP-1"),
+        slot=ReservationSlotDetail(slot_id="SLOT-1", date=future_date),
+    )
+
+    class DummyMessage:
+        created_at = datetime.now(UTC).replace(tzinfo=None)
+
+    async def fake_get_contact_by_id(contact_id: str) -> ContactInfo:
+        return contact
+
+    async def fake_get_reservation_status(ticket_id: str) -> ReservationStatusDetail:
+        return ticket
+
+    async def fake_get_messages(phone: str) -> list:
+        return []
+
+    async def fake_get_last_user_message(phone: str) -> DummyMessage:
+        return DummyMessage()
+
+    monkeypatch.setattr(erp_router, "_get_contact_by_id", fake_get_contact_by_id)
+    monkeypatch.setattr(
+        erp_router, "_get_reservation_status", fake_get_reservation_status
+    )
+    monkeypatch.setattr(erp_router.services, "get_messages", fake_get_messages)
+    monkeypatch.setattr(
+        erp_router.services, "get_last_user_message", fake_get_last_user_message
+    )
+
+    try:
+        await erp_router.notify_ticket_status(body)
+    except HTTPException as exc:
+        assert exc.status_code == 422
+        assert "todavía no ocurrió" in exc.detail or future_date in exc.detail
+    else:
+        raise AssertionError(
+            "Se esperaba HTTPException cuando el slot todavía no ha ocurrido"
+        )
+
+
+# uv run pytest -s chatbot/api/tests/test_erp_ticket_status.py::test_notify_ticket_status_completed_telegram_triggers_survey
+@pytest.mark.asyncio
+async def test_notify_ticket_status_completed_telegram_triggers_survey(
+    monkeypatch,
+) -> None:
+    """COMPLETED por canal Telegram debe enviar la encuesta por Telegram y registrar pending survey."""
+    from chatbot.reminders.lead_followup import CHANNEL_MARKERS, CHANNEL_TELEGRAM
+
+    telegram_chat_id = "-100123456789"
+    body = ERPTicketStatusRequest(
+        contact_id="CONTACT-TG-1",
+        ticket_id="TICKET-TG-1",
+        new_status=TicketDecision.COMPLETED,
+    )
+    contact = ContactInfo(contact_id="CONTACT-TG-1", phone=telegram_chat_id)
+    ticket = ReservationStatusDetail(
+        ticket_id="TICKET-TG-1",
+        status="COMPLETED",
+        contact=ReservationContactDetail(contact_id="CONTACT-TG-1"),
+        experience=ReservationExperienceDetail(experience_id="EXP-TG-1"),
+        slot=ReservationSlotDetail(slot_id="SLOT-TG-1", date=date.today().isoformat()),
+    )
+    telegram_sent: list[tuple[str, str]] = []
+    saved_messages: list[tuple[str, str, list[object]]] = []
+    pending_surveys: list[tuple[str, object]] = []
+
+    class FakeTelegramMsg:
+        role: str = "system"
+        message: str = CHANNEL_MARKERS[CHANNEL_TELEGRAM]
+
+    async def fake_get_contact_by_id(contact_id: str) -> ContactInfo:
+        return contact
+
+    async def fake_get_reservation_status(ticket_id: str) -> ReservationStatusDetail:
+        return ticket
+
+    async def fake_get_messages(phone: str) -> list:
+        return [FakeTelegramMsg()]
+
+    async def fake_send_telegram(*, chat_id: str, text: str) -> bool:
+        telegram_sent.append((chat_id, text))
+        return True
+
+    async def fake_save_assistant_msg(
+        phone: str, text: str, attachments: list[object]
+    ) -> None:
+        saved_messages.append((phone, text, attachments))
+
+    def fake_set_pending_survey(key: str, survey: object) -> None:
+        pending_surveys.append((key, survey))
+
+    monkeypatch.setattr(erp_router, "_get_contact_by_id", fake_get_contact_by_id)
+    monkeypatch.setattr(
+        erp_router, "_get_reservation_status", fake_get_reservation_status
+    )
+    monkeypatch.setattr(erp_router.services, "get_messages", fake_get_messages)
+    monkeypatch.setattr(erp_router, "send_telegram", fake_send_telegram)
+    monkeypatch.setattr(erp_router, "save_msg", fake_save_assistant_msg)
+    monkeypatch.setattr(erp_router, "set_pending_survey", fake_set_pending_survey)
+
+    result = await erp_router.notify_ticket_status(body)
+
+    assert result == {"status": "survey_sent", "chat_id": telegram_chat_id}
+    assert telegram_sent == [(telegram_chat_id, erp_router.SURVEY_MESSAGE)]
+    assert saved_messages == [(telegram_chat_id, erp_router.SURVEY_MESSAGE, [])]
+    assert len(pending_surveys) == 1
+    assert pending_surveys[0][0] == telegram_chat_id

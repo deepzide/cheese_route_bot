@@ -12,6 +12,7 @@ from pydantic_ai.tools import ToolDefinition
 from chatbot.ai_agent.dependencies import AgentDeps
 from chatbot.ai_agent.instructions import (
     get_current_itinerary_context,
+    get_pending_deposit_context,
     resolve_or_create_contact,
 )
 from chatbot.ai_agent.models import ERP_BASE_PATH, GoogleModel, ReservationStatus
@@ -20,9 +21,11 @@ from chatbot.ai_agent.tools.booking import (
     confirm_modification,
     create_pending_reservation,
     create_route_reservation,
+    get_cancellation_impact,
     get_reservation_status,
     get_reservations_by_phone,
     get_route_booking_status,
+    modify_reservation_preview,
 )
 from chatbot.ai_agent.tools.catalog import (
     get_availability,
@@ -130,11 +133,14 @@ AGENT_TOOLS = [
     create_pending_reservation,
     get_reservation_status,
     get_reservations_by_phone,
+    modify_reservation_preview,
     confirm_modification,
     cancel_reservation,
     # Route reservations
     create_route_reservation,
     get_route_booking_status,
+    # Pricing & cancellation policy
+    get_cancellation_impact,
     # Payments
     get_payment_instructions,
     # Date resolution sub-agent
@@ -206,6 +212,12 @@ def get_cheese_agent() -> Agent[AgentDeps, str]:
             ctx: RunContext[AgentDeps],
         ) -> str:
             return await get_current_itinerary_context(ctx)
+
+        @_cheese_agent.instructions
+        async def pending_deposit_context_instruction(
+            ctx: RunContext[AgentDeps],
+        ) -> str:
+            return await get_pending_deposit_context(ctx)
 
         @_cheese_agent.system_prompt
         async def list_experiences_prompt(

@@ -20,6 +20,8 @@ from chatbot.ai_agent.models import (
     ReservationsListResponse,
     ReservationStatusDetail,
     RouteBookingStatus,
+    RouteModificationPreview,
+    RouteTicketChange,
 )
 from chatbot.ai_agent.tools.erp_utils import extract_erp_data, extract_erp_error
 
@@ -570,3 +572,133 @@ async def get_cancellation_impact(
         )
 
     return CancellationImpact.model_validate(data)
+
+
+# ------------------------------------------------------------------
+# 10. Cancel route booking
+# ------------------------------------------------------------------
+
+
+async def cancel_route_booking(
+    ctx: RunContext[AgentDeps],
+    route_booking_id: str,
+    cancellation_reason: str,
+) -> str:
+    """Cancel a route booking.
+
+    According to business rules, a cancellation reason is REQUIRED before
+    proceeding. Always ask the user for their reason before calling this tool.
+    If the user has not provided a reason yet, return a message asking for it
+    instead of calling this tool.
+
+    Args:
+        ctx: Agent run context with dependencies.
+        route_booking_id: ERP route booking ID (e.g. "RB-2026-03-00013").
+        cancellation_reason: Reason provided by the user for the cancellation.
+    """
+    logger.info(
+        "[cancel_route_booking] route_booking_id=%s reason=%s — endpoint in maintenance",
+        route_booking_id,
+        cancellation_reason,
+    )
+    return (
+        "La cancelación de reservas de ruta no está disponible temporalmente por mantenimiento en el ERP. "
+        "Informá al usuario que puede comunicarse con el equipo de Ruta del Queso para gestionar la cancelación manualmente."
+    )
+
+
+# ------------------------------------------------------------------
+# 11. Modify route booking preview
+# ------------------------------------------------------------------
+
+
+async def modify_route_booking_preview(
+    ctx: RunContext[AgentDeps],
+    route_booking_id: str,
+    changes: list[RouteTicketChange],
+) -> RouteModificationPreview | str:
+    """Check whether modifications to a route booking are allowed and preview price impact.
+
+    Call this BEFORE confirm_route_modification so the user can be informed of
+    any price difference. Each item in ``changes`` must include the ticket_id
+    and at least one of new_slot or party_size.
+
+    Args:
+        ctx: Agent run context with dependencies.
+        route_booking_id: ERP route booking ID (e.g. "RB-2026-03-00013").
+        changes: List of ticket-level changes to preview.
+    """
+    logger.info(
+        "[modify_route_booking_preview] route_booking_id=%s changes=%s",
+        route_booking_id,
+        changes,
+    )
+
+    if not changes:
+        raise ModelRetry(
+            "At least one ticket change must be provided to preview a route modification."
+        )
+
+    changes_payload = [
+        {k: v for k, v in c.model_dump().items() if v is not None} for c in changes
+    ]
+
+    response = await ctx.deps.erp_client.post(
+        f"{ERP_BASE_PATH}.route_booking_controller.modify_route_booking_preview",
+        json={
+            "route_booking_id": route_booking_id,
+            "changes": changes_payload,
+        },
+        timeout=ERP_TIMEOUT_SECONDS,
+    )
+    if response.is_error:
+        erp_message = extract_erp_error(response.json())
+        logger.error(
+            "[modify_route_booking_preview] ERP error %s: %s",
+            response.status_code,
+            erp_message,
+        )
+        return f"No es posible previsualizar la modificación de la ruta: {erp_message}"
+
+    data: dict[str, Any] = extract_erp_data(response.json())
+    if "route_booking_id" not in data:
+        data["route_booking_id"] = route_booking_id
+
+    preview = RouteModificationPreview.model_validate(data)
+    logger.info(
+        "[modify_route_booking_preview] route_booking_id=%s changes_count=%s",
+        preview.route_booking_id,
+        len(preview.changes),
+    )
+    return preview
+
+
+# ------------------------------------------------------------------
+# 12. Confirm route modification
+# ------------------------------------------------------------------
+
+
+async def confirm_route_modification(
+    ctx: RunContext[AgentDeps],
+    route_booking_id: str,
+    changes: list[RouteTicketChange],
+) -> str:
+    """Apply confirmed modifications to a route booking.
+
+    Must be called AFTER modify_route_booking_preview and only when the user
+    has explicitly confirmed the changes and the price impact.
+
+    Args:
+        ctx: Agent run context with dependencies.
+        route_booking_id: ERP route booking ID (e.g. "RB-2026-03-00013").
+        changes: List of ticket-level changes to apply.
+    """
+    logger.info(
+        "[confirm_route_modification] route_booking_id=%s changes=%s — endpoint in maintenance",
+        route_booking_id,
+        changes,
+    )
+    return (
+        "La modificación de reservas de ruta no está disponible temporalmente por mantenimiento en el ERP. "
+        "Informá al usuario que puede comunicarse con el equipo de Ruta del Queso para gestionar el cambio manualmente."
+    )

@@ -18,7 +18,9 @@ from chatbot.ai_agent.instructions import (
 from chatbot.ai_agent.models import ERP_BASE_PATH, GoogleModel, ReservationStatus
 from chatbot.ai_agent.tools.booking import (
     cancel_reservation,
+    cancel_route_booking,
     confirm_modification,
+    confirm_route_modification,
     create_pending_reservation,
     create_route_reservation,
     get_cancellation_impact,
@@ -26,6 +28,7 @@ from chatbot.ai_agent.tools.booking import (
     get_reservations_by_phone,
     get_route_booking_status,
     modify_reservation_preview,
+    modify_route_booking_preview,
 )
 from chatbot.ai_agent.tools.catalog import (
     get_availability,
@@ -139,6 +142,9 @@ AGENT_TOOLS = [
     # Route reservations
     create_route_reservation,
     get_route_booking_status,
+    cancel_route_booking,
+    modify_route_booking_preview,
+    confirm_route_modification,
     # Pricing & cancellation policy
     get_cancellation_impact,
     # Payments

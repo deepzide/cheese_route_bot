@@ -898,6 +898,63 @@ class RouteBookingStatus(BaseModel):
         return data
 
 
+class RouteTicketChange(BaseModel):
+    """A single ticket change inside a route modification request.
+
+    Used as input for route_booking_controller.modify_route_booking_preview
+    and route_booking_controller.confirm_route_modification.
+    """
+
+    ticket_id: str
+    new_slot: str | None = None
+    party_size: int | None = None
+
+
+class RouteTicketChangePreview(BaseModel):
+    """Preview of a single ticket change within a route modification.
+
+    ERP response fields per change: ticket_id, current_slot, current_party_size,
+    new_slot, slot_changed, new_party_size, party_size_changed.
+    """
+
+    ticket_id: str
+    current_slot: str | None = None
+    current_party_size: int | None = None
+    new_slot: str | None = None
+    slot_changed: bool = False
+    new_party_size: int | None = None
+    party_size_changed: bool = False
+
+
+class RouteModificationPreview(BaseModel):
+    """Preview returned by route_booking_controller.modify_route_booking_preview.
+
+    ERP request: route_booking_id, changes (list of ticket_id + new_slot/party_size).
+    ERP response fields: route_booking_id, changes (list of RouteTicketChangePreview), note.
+    """
+
+    route_booking_id: str
+    changes: list[RouteTicketChangePreview] = Field(default_factory=list)
+    note: str | None = None
+
+
+class RouteModificationResult(BaseModel):
+    """Result of route_booking_controller.confirm_route_modification."""
+
+    route_booking_id: str
+    status: str | None = None
+    changes_applied: list[str] = Field(default_factory=list)
+
+
+class RouteCancellationResult(BaseModel):
+    """Result of route_booking_controller.cancel_route_booking."""
+
+    route_booking_id: str
+    old_status: str | None = None
+    new_status: str | None = None
+    cancelled_tickets: list[str] = Field(default_factory=list)
+
+
 # ---------------------------------------------------------------------------
 # 11. Payments
 # ---------------------------------------------------------------------------

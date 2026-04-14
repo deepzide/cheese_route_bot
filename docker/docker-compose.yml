@@ -3,12 +3,35 @@ services:
     build:
       context: ..
       dockerfile: docker/Dockerfile
+    command: ["uv", "run", "python", "scripts/run_telegram_bot.py"]
     restart: unless-stopped
     env_file:
       - ../.env
     environment:
       # Override DATABASE_URL to use the db service name instead of localhost
       DATABASE_URL: postgresql://osliani:ofs@db:5432/cheese
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - cheese-net
+
+  whatsapp-bot:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    command: ["uv", "run", "uvicorn", "chatbot.api.main:app", "--host", "0.0.0.0", "--port", "8000"]
+    restart: unless-stopped
+    env_file:
+      - ../.env
+    environment:
+      # Override DATABASE_URL to use the db service name instead of localhost
+      DATABASE_URL: postgresql://osliani:ofs@db:5432/cheese
+    ports:
+      - "8000:8000"
+    volumes:
+      # Persist uploaded media files (images, voice notes, documents)
+      - static_files:/app/static
     depends_on:
       db:
         condition: service_healthy
@@ -34,6 +57,7 @@ services:
 
 volumes:
   postgres_data:
+  static_files:
 
 networks:
   cheese-net:

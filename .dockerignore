@@ -1,10 +1,45 @@
-.venv/
-.env
-__pycache__/
-*.pyc
-*.pyo
+# Version control
 .git/
 .gitignore
+
+# Python
+.venv/
+__pycache__/
+**/__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.egg-info/
+.ruff_cache/
+.mypy_cache/
+.pytest_cache/
+
+# Environment files (mounted via env_file in compose)
+.env
+.env.*
+
+# IDE
+.vscode/
+.idea/
+
+# Logs
 logs/
-static/voice/
 *.log
+
+# Uploaded/generated media files (served from named volume in production)
+static/images/
+static/documents/
+static/voice/
+
+# Context / docs (not needed at runtime)
+context/
+README.md
+notes.md
+API_docs.md
+*.postman_collection.json
+command.txt
+
+# Development-only files
+Pipfile
+Pipfile.lock
+ruff.toml

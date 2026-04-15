@@ -89,72 +89,86 @@ async def demo_chat(
     session_id: str = body.session_id or str(uuid.uuid4())
     message: str = body.message
 
-    logger.info("[demo/chat] session=%s message=%.80s", session_id, message)
-
-    deps = AgentDeps(
-        erp_client=erp_client,
-        db_services=services,
-        whatsapp_client=whatsapp_manager,
-        user_phone=session_id,
-    )
-
-    history = await load_history(services, session_id)
-    await save_user_message(services, session_id, message)
-
-    agent = get_demo_agent()
-
     try:
-        result = await agent.run(message, deps=deps, message_history=history)
-    except _PROVIDER_ERRORS as exc:
-        logger.warning(
-            "[demo/chat] Provider error on first attempt — retrying with fallback model. error=%s",
-            exc,
+        logger.info("[demo/chat] session=%s message=%.80s", session_id, message)
+
+        deps = AgentDeps(
+            erp_client=erp_client,
+            db_services=services,
+            whatsapp_client=whatsapp_manager,
+            user_phone=session_id,
         )
+
+        history = await load_history(services, session_id)
+        await save_user_message(services, session_id, message)
+
+        agent = get_demo_agent()
+
         try:
-            result = await agent.run(
-                message,
-                deps=deps,
-                message_history=history,
-                model=FALLBACK_MODEL,
+            result = await agent.run(message, deps=deps, message_history=history)
+        except _PROVIDER_ERRORS as exc:
+            logger.warning(
+                "[demo/chat] Provider error on first attempt — retrying with fallback model. error=%s",
+                exc,
             )
-        except Exception as retry_exc:
+            try:
+                result = await agent.run(
+                    message,
+                    deps=deps,
+                    message_history=history,
+                    model=FALLBACK_MODEL,
+                )
+            except Exception as retry_exc:
+                logger.error(
+                    "[demo/chat] Fallback model also failed. session=%s error=%s",
+                    session_id,
+                    retry_exc,
+                    exc_info=True,
+                )
+                await notify_error(
+                    retry_exc,
+                    context=f"demo_chat fallback | session={session_id}",
+                )
+                raise HTTPException(
+                    status_code=500, detail="Internal server error"
+                ) from retry_exc
+        except Exception as exc:
             logger.error(
-                "[demo/chat] Fallback model also failed. session=%s error=%s",
+                "[demo/chat] Unexpected agent error. session=%s error=%s",
                 session_id,
-                retry_exc,
+                exc,
                 exc_info=True,
             )
-            await notify_error(
-                retry_exc,
-                context=f"demo_chat fallback | session={session_id}",
-            )
+            await notify_error(exc, context=f"demo_chat agent | session={session_id}")
             raise HTTPException(
                 status_code=500, detail="Internal server error"
-            ) from retry_exc
+            ) from exc
+
+        reply: str = result.output
+        tools_used: list[str] = _extract_tools_used(result)
+
+        await save_assistant_message(services, session_id, reply, tools_used)
+
+        logger.info(
+            "[demo/chat] session=%s tools=%s response=%.80s",
+            session_id,
+            tools_used,
+            reply,
+        )
+
+        return DemoChatResponse(
+            session_id=session_id,
+            response=reply,
+            tools_used=tools_used,
+        )
+    except HTTPException:
+        raise
     except Exception as exc:
         logger.error(
-            "[demo/chat] Unexpected error. session=%s error=%s",
+            "[demo/chat] Unexpected endpoint error. session=%s error=%s",
             session_id,
             exc,
             exc_info=True,
         )
-        await notify_error(exc, context=f"demo_chat | session={session_id}")
+        await notify_error(exc, context=f"demo_chat endpoint | session={session_id}")
         raise HTTPException(status_code=500, detail="Internal server error") from exc
-
-    reply: str = result.output
-    tools_used: list[str] = _extract_tools_used(result)
-
-    await save_assistant_message(services, session_id, reply, tools_used)
-
-    logger.info(
-        "[demo/chat] session=%s tools=%s response=%.80s",
-        session_id,
-        tools_used,
-        reply,
-    )
-
-    return DemoChatResponse(
-        session_id=session_id,
-        response=reply,
-        tools_used=tools_used,
-    )

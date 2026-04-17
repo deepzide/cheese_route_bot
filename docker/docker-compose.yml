@@ -31,7 +31,9 @@ services:
       - "8000:8000"
     volumes:
       # Persist uploaded media files (images, voice notes, documents)
-      - static_files:/app/static
+      - static_images:/app/static/images
+      - static_voice:/app/static/voice
+      - static_documents:/app/static/documents
     depends_on:
       db:
         condition: service_healthy
@@ -57,7 +59,9 @@ services:
 
 volumes:
   postgres_data:
-  static_files:
+  static_images:
+  static_voice:
+  static_documents:
 
 networks:
   cheese-net:

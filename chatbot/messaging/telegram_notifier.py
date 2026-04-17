@@ -82,6 +82,45 @@ async def notify_error(
         logger.warning("Could not send Telegram notification: %s", notify_exc)
 
 
+async def notify_dev(message: str) -> None:
+    """Send an informational message to the developer's Telegram chat.
+
+    Args:
+        message: Text to send (supports Markdown).
+    """
+    token: str = config.TELEGRAM_BOT_TOKEN_NOTIFIER
+    chat_id: str = config.TELEGRAM_DEV_CHAT_ID
+
+    if not token or not chat_id:
+        logger.warning(
+            "Telegram notifier not configured (TELEGRAM_BOT_TOKEN_NOTIFIER / TELEGRAM_DEV_CHAT_ID missing)"
+        )
+        return
+
+    try:
+        async with httpx.AsyncClient(
+            base_url=TELEGRAM_API_BASE, timeout=_SEND_TIMEOUT
+        ) as client:
+            response = await client.post(
+                f"/bot{token}/sendMessage",
+                json={
+                    "chat_id": chat_id,
+                    "text": message,
+                    "parse_mode": "Markdown",
+                },
+            )
+            if not response.is_success:
+                logger.warning(
+                    "Telegram dev notification failed: %s %s",
+                    response.status_code,
+                    response.text[:200],
+                )
+            else:
+                logger.debug("Telegram dev notification sent to %s", chat_id)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Could not send Telegram dev notification: %s", exc)
+
+
 def _build_slow_response_message(
     phone: str,
     user_message: str,

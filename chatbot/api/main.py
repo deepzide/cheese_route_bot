@@ -16,6 +16,7 @@ from chatbot.core.config import config
 from chatbot.core.logging_conf import init_logging
 from chatbot.core.sentry import init_sentry
 from chatbot.db.services import services
+from chatbot.messaging.telegram_notifier import notify_dev
 from chatbot.reminders.deposit_reminder import deposit_reminder_worker
 from chatbot.reminders.event_reminder import event_reminder_worker
 from chatbot.reminders.lead_followup import lead_followup_worker
@@ -43,6 +44,8 @@ async def lifespan(app: FastAPI):
     event_reminder_task: Task[None] = create_task(
         event_reminder_worker(db_services=services)
     )
+
+    await notify_dev("✅ *Cheese Bot started successfully*")
 
     yield
 

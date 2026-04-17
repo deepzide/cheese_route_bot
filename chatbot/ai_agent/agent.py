@@ -60,7 +60,8 @@ from chatbot.ai_agent.tools.support import create_complaint, submit_survey
 logger = logging.getLogger(__name__)
 ERP_TIMEOUT_SECONDS = 15.0
 
-PROMPT_FILE: Path = Path("static/prompt.txt")
+_PROJECT_ROOT: Path = Path(__file__).resolve().parent.parent.parent
+PROMPT_FILE: Path = _PROJECT_ROOT / "static" / "prompt.txt"
 FALLBACK_MODEL: str = GoogleModel.Gemini_3_Flash_Preview
 
 

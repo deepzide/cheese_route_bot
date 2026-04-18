@@ -71,6 +71,7 @@ class ParsedMessage:
     is_pdf: bool = False
     unsupported_format: bool = False
     audio_error: bool = False
+    audio_error_detail: str | None = None
 
 
 async def extract_message_content(webhook_data: dict) -> ParsedMessage | None:
@@ -220,6 +221,7 @@ async def extract_message_content(webhook_data: dict) -> ParsedMessage | None:
                         user_number=user_number,
                         message_id=message_id,
                         audio_error=True,
+                        audio_error_detail=f"{type(exc).__name__}: {exc}",
                     )
 
         else:

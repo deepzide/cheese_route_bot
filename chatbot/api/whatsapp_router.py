@@ -772,6 +772,10 @@ async def whatsapp_reply(request: Request, background_tasks: BackgroundTasks):
             ),
             message_id=message_id,
         )
+        await notify_error(
+            RuntimeError(message_data.audio_error_detail or "Unknown audio error"),
+            context=f"audio transcription | user={user_number}",
+        )
         return OK_STATUS
 
     # --- Image/PDF with ticket in caption: OCR already done → register payment ---

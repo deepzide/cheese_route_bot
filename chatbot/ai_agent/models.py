@@ -616,6 +616,18 @@ class EstablishmentExperience(BaseModel):
     route_price: float | None = None
 
 
+class EstablishmentPhoto(BaseModel):
+    """Photo entry returned inside EstablishmentDetail."""
+
+    document_id: str | None = None
+    title: str | None = None
+    file_url: str
+    tags: str | None = None
+    language: str | None = None
+    version: str | None = None
+    entity_type: str | None = None
+
+
 class BankAccount(BaseModel):
     """Bank account entry returned inside EstablishmentDetail."""
 
@@ -649,7 +661,7 @@ class EstablishmentDetail(BaseModel):
     tickets_by_status: dict[str, int] = Field(default_factory=dict)
     logo: str | None = None
     documents: list[Any] = Field(default_factory=list)
-    photos: list[Any] = Field(default_factory=list)
+    photos: list[EstablishmentPhoto] = Field(default_factory=list)
     links: list[Any] = Field(default_factory=list)
     pdfs: list[Any] = Field(default_factory=list)
     bank_account: list[BankAccount] = Field(default_factory=list)

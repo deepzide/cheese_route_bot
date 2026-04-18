@@ -11,6 +11,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+import httpx
 from pydantic_ai import RunContext
 
 from chatbot.ai_agent.dependencies import AgentDeps
@@ -18,10 +19,13 @@ from chatbot.ai_agent.models import (
     ERP_BASE_PATH,
     AvailabilityResponse,
     Establishment,
+    EstablishmentDetail,
+    EstablishmentPhoto,
     Experience,
     Route,
 )
 from chatbot.ai_agent.tools.erp_utils import extract_erp_data
+from chatbot.core.config import config
 
 logger = logging.getLogger(__name__)
 
@@ -353,3 +357,103 @@ async def get_route_availability(
     )
     response.raise_for_status()
     return extract_erp_data(response.json())
+
+
+# ------------------------------------------------------------------
+# Establishment photos
+# ------------------------------------------------------------------
+
+IMAGE_DOWNLOAD_TIMEOUT: float = 15.0
+
+
+def _build_photo_url(file_url: str) -> str:
+    """Compose the full URL for an establishment photo."""
+    host = config.ERP_HOST.rstrip("/")
+    return f"{host}/{file_url.lstrip('/')}"
+
+
+async def send_establishment_photos(
+    ctx: RunContext[AgentDeps],
+    establishment_id: str,
+) -> str:
+    """Send the photos of a specific establishment to the user.
+
+    Fetches establishment details from the ERP, downloads each photo and
+    delivers it through the current messaging channel (WhatsApp or Telegram).
+
+    Args:
+        ctx: Agent run context with dependencies.
+        establishment_id: ERP id of the establishment whose photos should be sent.
+    """
+    logger.info("[send_establishment_photos] establishment_id=%s", establishment_id)
+
+    if ctx.deps.send_photo_callback is None:
+        return (
+            "I cannot send images through the current channel. "
+            "Please contact the establishment directly to see their photos."
+        )
+
+    # Fetch establishment details
+    try:
+        resp = await ctx.deps.erp_client.post(
+            f"{ERP_BASE_PATH}.establishment_controller.get_establishment_details",
+            json={"company_id": establishment_id},
+            timeout=ERP_TIMEOUT_SECONDS,
+        )
+        resp.raise_for_status()
+        data: dict[str, Any] = extract_erp_data(resp.json())
+        detail = EstablishmentDetail.model_validate(data)
+    except httpx.HTTPStatusError as exc:
+        logger.error(
+            "[send_establishment_photos] ERP error for %s: %s",
+            establishment_id,
+            exc,
+        )
+        return "Could not retrieve establishment details. Please try again later."
+    except httpx.HTTPError as exc:
+        logger.error(
+            "[send_establishment_photos] Network error for %s: %s",
+            establishment_id,
+            exc,
+        )
+        return "Could not connect to the system. Please try again later."
+
+    photos: list[EstablishmentPhoto] = detail.photos
+    if not photos:
+        return f"The establishment '{detail.name}' has no photos available."
+
+    sent_count: int = 0
+    for photo in photos:
+        photo_url = _build_photo_url(photo.file_url)
+        caption = photo.title or detail.name
+
+        try:
+            async with httpx.AsyncClient(timeout=IMAGE_DOWNLOAD_TIMEOUT) as client:
+                img_resp = await client.get(photo_url)
+                img_resp.raise_for_status()
+                image_bytes: bytes = img_resp.content
+        except httpx.HTTPError as exc:
+            logger.warning(
+                "[send_establishment_photos] Failed to download %s: %s",
+                photo_url,
+                exc,
+            )
+            continue
+
+        try:
+            await ctx.deps.send_photo_callback(image_bytes, caption)
+            sent_count += 1
+        except Exception as exc:
+            logger.error(
+                "[send_establishment_photos] Failed to deliver photo %s: %s",
+                photo.document_id,
+                exc,
+            )
+
+    if sent_count == 0:
+        return (
+            f"Found {len(photos)} photo(s) for '{detail.name}' "
+            "but could not deliver any. Please try again later."
+        )
+
+    return f"Sent {sent_count} photo(s) of '{detail.name}' successfully."

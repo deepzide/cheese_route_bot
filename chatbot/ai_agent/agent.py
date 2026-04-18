@@ -42,6 +42,7 @@ from chatbot.ai_agent.tools.catalog import (
     list_experiences,
     list_experiences_by_availability,
     list_routes,
+    send_establishment_photos,
 )
 from chatbot.ai_agent.tools.customer import (
     update_contact,
@@ -131,6 +132,7 @@ AGENT_TOOLS = [
     get_route_detail,
     list_establishments,
     get_establishment_details,
+    send_establishment_photos,
     # Availability
     get_availability,
     list_experiences_by_availability,

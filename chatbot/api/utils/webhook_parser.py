@@ -59,6 +59,7 @@ class ParsedMessage:
     For image/PDF messages WITHOUT ticket in caption, ``media_file_path`` and ``is_pdf``
     are set so the router can store the path and defer OCR until the ticket arrives.
     For unsupported document formats (e.g. docx), ``unsupported_format`` is True.
+    For audio messages that failed to transcribe, ``audio_error`` is True.
     """
 
     user_number: str
@@ -69,6 +70,7 @@ class ParsedMessage:
     media_file_path: str | None = None
     is_pdf: bool = False
     unsupported_format: bool = False
+    audio_error: bool = False
 
 
 async def extract_message_content(webhook_data: dict) -> ParsedMessage | None:
@@ -214,7 +216,11 @@ async def extract_message_content(webhook_data: dict) -> ParsedMessage | None:
                     )
                 except Exception as exc:
                     logger.exception(f"Failed to download audio media: {exc}")
-                    return None
+                    return ParsedMessage(
+                        user_number=user_number,
+                        message_id=message_id,
+                        audio_error=True,
+                    )
 
         else:
             incoming_msg = _extract_text_from_message(message, user_number)
@@ -268,16 +274,16 @@ async def _extract_voice_from_message(
     logger.info(f"Saved voice note to {file_path}")
 
     if not config.USE_FFMPEG or ext in AVAILABLE_AUDIO_FORMATS:
-        return transcribe_audio(str(file_path))
+        return await transcribe_audio(str(file_path))
 
     mp3_path = file_path.with_suffix(".mp3")
     ok = await convert_ogg_to_mp3(input_path=file_path, output_path=mp3_path)
     if ok:
         logger.info(f"Converted {ext} to MP3 with ffmpeg")
-        return transcribe_audio(str(mp3_path))
+        return await transcribe_audio(str(mp3_path))
 
     logger.warning("FFmpeg conversion failed, using original file for transcription")
-    return transcribe_audio(str(file_path))
+    return await transcribe_audio(str(file_path))
 
 
 def _extract_text_from_message(message: dict, user_number: str) -> str:

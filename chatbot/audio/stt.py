@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import sys
 from pathlib import Path
@@ -13,21 +14,26 @@ openai_client = OpenAI(api_key=config.OPENAI_API_KEY, timeout=REQUEST_TIMEOUT_SE
 AVAILABLE_AUDIO_FORMATS = {".mp3", ".mp4", ".mpeg", ".mpga", ".m4a", ".wav", ".webm"}
 
 
-def transcribe_audio(voice_path: str) -> str:
+async def transcribe_audio(voice_path: str) -> str:
     if not any(voice_path.endswith(ext) for ext in AVAILABLE_AUDIO_FORMATS):
         logger.warning(
             f"Audio format of {voice_path} may not be supported for transcription"
         )
-    with open(voice_path, "rb") as audio_file:
-        transcription = openai_client.audio.transcriptions.create(
-            model="gpt-4o-transcribe", file=audio_file
-        )
-        logger.debug(f"Transcription of {voice_path}: {transcription.text}")
-        return transcription.text
+
+    def _sync_transcribe() -> str:
+        with open(voice_path, "rb") as audio_file:
+            transcription = openai_client.audio.transcriptions.create(
+                model="gpt-4o-transcribe", file=audio_file
+            )
+            return transcription.text
+
+    result = await asyncio.to_thread(_sync_transcribe)
+    logger.debug(f"Transcription of {voice_path}: {result}")
+    return result
 
 
 if __name__ == "__main__":
     voice_path = (
         "C:/Users/lilia/Desktop/Projects/DeepZide/apacha_bot/static/voice/test.ogg"  # noqa: E501
     )
-    print(transcribe_audio(voice_path))
+    print(asyncio.run(transcribe_audio(voice_path)))

@@ -760,6 +760,20 @@ async def whatsapp_reply(request: Request, background_tasks: BackgroundTasks):
         )
         return OK_STATUS
 
+    # --- Audio transcription failed ---
+    if message_data.audio_error:
+        await whatsapp_manager.mark_read(message_id)
+        await whatsapp_manager.send_text(
+            user_number=user_number,
+            text=await localize_message(
+                user_number,
+                "Sorry, I couldn't process your voice message. "
+                "Please try again or send your message as text.",
+            ),
+            message_id=message_id,
+        )
+        return OK_STATUS
+
     # --- Image/PDF with ticket in caption: OCR already done → register payment ---
     if message_data.receipt is not None:
         await whatsapp_manager.mark_read(message_id)

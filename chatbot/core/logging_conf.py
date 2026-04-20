@@ -1,7 +1,7 @@
 import os
+from logging.config import dictConfig
 
 from chatbot.core.config import config
-from logging.config import dictConfig
 
 if not os.path.exists("logs"):
     os.makedirs("logs")
@@ -53,14 +53,14 @@ logging_conf = {
         },
         "sentry": {
             "class": "sentry_sdk.integrations.logging.SentryHandler",
-            "level": "INFO",
+            "level": "ERROR",
             "formatter": "file",
             "filters": ["correlation_id"],
         },
     },
     "loggers": {
         "uvicorn": {
-            "handlers": ["default", "rotating_file", "sentry"],
+            "handlers": ["default", "rotating_file"],
             "level": "INFO",
         },
         "databases": {

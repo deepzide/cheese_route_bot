@@ -7,6 +7,7 @@ from datetime import datetime
 from typing import Any
 
 import httpx
+import sentry_sdk
 from dotenv import load_dotenv
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Request
 from fastapi.responses import PlainTextResponse
@@ -507,227 +508,232 @@ async def _handle_pending_survey_response(
 
 async def _process_message(message: Message) -> None:
     """Process a single message from the queue sequentially per user."""
-    user_number = message.user_number
-    incoming_msg = message.content
-    message_id = message.message_id
-
-    if not message_id:
-        logger.error("No message_id provided for WhatsApp message")
-        return
-
-    await whatsapp_manager.mark_read(message_id)
-    await whatsapp_manager.send_typing_indicator(message_id)
-
-    if await _handle_pending_survey_response(
-        user_number=user_number,
-        incoming_msg=incoming_msg,
-        message_id=message_id,
+    with sentry_sdk.start_transaction(
+        op="whatsapp", name=f"Process Message {message.user_number}"
     ):
-        return
+        user_number = message.user_number
+        incoming_msg = message.content
+        message_id = message.message_id
 
-    # ------------------------------------------------------------------
-    # Pending payment receipt — waiting for ticket ID from the user
-    # ------------------------------------------------------------------
-    if user_number in _pending_receipt:
-        match = _TICKET_ID_RE.search(incoming_msg)
-        if match:
-            ticket_id_pending = match.group().upper()
-            logger.info(
-                "[receipt] Received ticket_id=%s for pending receipt of user=%s",
-                ticket_id_pending,
-                user_number,
-            )
-            pending = _pending_receipt.pop(user_number)
-            await _register_and_notify_payment(
-                user_number=user_number,
-                message_id=message_id,
-                file_path=pending.file_path,
-                is_pdf=pending.is_pdf,
-                ticket_id=ticket_id_pending,
-            )
-            return
-        else:
-            # No ticket_id found — stop waiting and pass the message to the AI agent
-            _pending_receipt.pop(user_number, None)
-            logger.info(
-                "[receipt] No ticket_id found in message for user=%s — releasing to AI agent",
-                user_number,
-            )
-            # Fall through to AI agent processing
-
-    # ------------------------------------------------------------------
-    # Human-control check: skip AI if operator has taken over this chat
-    # ------------------------------------------------------------------
-    if human_control.is_whatsapp_controlled(user_number):
-        logger.info(
-            "[human-control] Skipping AI for %s — conversation under human control",
-            user_number,
-        )
-        return
-
-    try:
-        if incoming_msg.lower() == "/restart":
-            logger.info("'/restart' requested by %s", user_number)
-            await services.reset_chat(user_number)
-            await whatsapp_manager.send_text(
-                user_number=user_number,
-                text=await localize_message(user_number, "Chat restarted"),
-                message_id=message_id,
-            )
+        if not message_id:
+            logger.error("No message_id provided for WhatsApp message")
             return
 
-        logger.info("=" * 80)
-        logger.info("%s: %s", user_number, incoming_msg)
+        await whatsapp_manager.mark_read(message_id)
+        await whatsapp_manager.send_typing_indicator(message_id)
 
-        await services.ensure_system_message(
-            phone=user_number,
-            message="CHANNEL: whatsapp",
-        )
-        await message_handler.save_user_msg(user_number, incoming_msg)
+        if await _handle_pending_survey_response(
+            user_number=user_number,
+            incoming_msg=incoming_msg,
+            message_id=message_id,
+        ):
+            return
 
-        async def _send_photo_wa(image_bytes: bytes, caption: str) -> None:
-            media_id = await whatsapp_manager.upload_media_bytes(image_bytes)
-            await whatsapp_manager.send_image_by_id(
-                to=user_number, image_id=media_id, caption=caption
+        # ------------------------------------------------------------------
+        # Pending payment receipt — waiting for ticket ID from the user
+        # ------------------------------------------------------------------
+        if user_number in _pending_receipt:
+            match = _TICKET_ID_RE.search(incoming_msg)
+            if match:
+                ticket_id_pending = match.group().upper()
+                logger.info(
+                    "[receipt] Received ticket_id=%s for pending receipt of user=%s",
+                    ticket_id_pending,
+                    user_number,
+                )
+                pending = _pending_receipt.pop(user_number)
+                await _register_and_notify_payment(
+                    user_number=user_number,
+                    message_id=message_id,
+                    file_path=pending.file_path,
+                    is_pdf=pending.is_pdf,
+                    ticket_id=ticket_id_pending,
+                )
+                return
+            else:
+                # No ticket_id found — stop waiting and pass the message to the AI agent
+                _pending_receipt.pop(user_number, None)
+                logger.info(
+                    "[receipt] No ticket_id found in message for user=%s — releasing to AI agent",
+                    user_number,
+                )
+                # Fall through to AI agent processing
+
+        # ------------------------------------------------------------------
+        # Human-control check: skip AI if operator has taken over this chat
+        # ------------------------------------------------------------------
+        if human_control.is_whatsapp_controlled(user_number):
+            logger.info(
+                "[human-control] Skipping AI for %s — conversation under human control",
+                user_number,
             )
-
-        deps = AgentDeps(
-            erp_client=erp_client,
-            db_services=services,
-            whatsapp_client=whatsapp_manager,
-            user_phone=user_number,
-            send_photo_callback=_send_photo_wa,
-        )
-
-        agent = get_cheese_agent()
-        history = await services.get_pydantic_ai_history(user_number, hours=24)
-
-        ai_response: str
-        tools_used: list[str]
-        message_datetime = datetime.now()
-        provider_error: str | None = None
+            return
 
         try:
-            agent_start = time.monotonic()
+            if incoming_msg.lower() == "/restart":
+                logger.info("'/restart' requested by %s", user_number)
+                await services.reset_chat(user_number)
+                await whatsapp_manager.send_text(
+                    user_number=user_number,
+                    text=await localize_message(user_number, "Chat restarted"),
+                    message_id=message_id,
+                )
+                return
+
+            logger.info("=" * 80)
+            logger.info("%s: %s", user_number, incoming_msg)
+
+            await services.ensure_system_message(
+                phone=user_number,
+                message="CHANNEL: whatsapp",
+            )
+            await message_handler.save_user_msg(user_number, incoming_msg)
+
+            async def _send_photo_wa(image_bytes: bytes, caption: str) -> None:
+                media_id = await whatsapp_manager.upload_media_bytes(image_bytes)
+                await whatsapp_manager.send_image_by_id(
+                    to=user_number, image_id=media_id, caption=caption
+                )
+
+            deps = AgentDeps(
+                erp_client=erp_client,
+                db_services=services,
+                whatsapp_client=whatsapp_manager,
+                user_phone=user_number,
+                send_photo_callback=_send_photo_wa,
+            )
+
+            agent = get_cheese_agent()
+            history = await services.get_pydantic_ai_history(user_number, hours=24)
+
+            ai_response: str
+            tools_used: list[str]
+            message_datetime = datetime.now()
+            provider_error: str | None = None
+
             try:
-                result = await agent.run(
-                    incoming_msg, deps=deps, message_history=history
-                )
-            except _PROVIDER_ERRORS as provider_exc:
-                logger.warning(
-                    "Provider error on first attempt for %s: %s. Retrying...",
-                    user_number,
-                    provider_exc,
-                )
-                provider_error = f"{type(provider_exc).__name__}: {provider_exc}"
-                if (
-                    isinstance(provider_exc, ModelHTTPError)
-                    and provider_exc.status_code == 503
-                ):
-                    logger.info(
-                        "[fallback] 503 on primary model — switching to %s",
-                        FALLBACK_MODEL,
-                    )
-                    result = await agent.run(
-                        incoming_msg,
-                        deps=deps,
-                        message_history=history,
-                        model=FALLBACK_MODEL,
-                    )
-                else:
+                agent_start = time.monotonic()
+                try:
                     result = await agent.run(
                         incoming_msg, deps=deps, message_history=history
                     )
-            except UsageLimitExceeded as ule:
-                logger.warning(
-                    "UsageLimitExceeded for %s: %s. Summarizing history and retrying...",
-                    user_number,
-                    ule,
+                except _PROVIDER_ERRORS as provider_exc:
+                    logger.warning(
+                        "Provider error on first attempt for %s: %s. Retrying...",
+                        user_number,
+                        provider_exc,
+                    )
+                    provider_error = f"{type(provider_exc).__name__}: {provider_exc}"
+                    if (
+                        isinstance(provider_exc, ModelHTTPError)
+                        and provider_exc.status_code == 503
+                    ):
+                        logger.info(
+                            "[fallback] 503 on primary model — switching to %s",
+                            FALLBACK_MODEL,
+                        )
+                        result = await agent.run(
+                            incoming_msg,
+                            deps=deps,
+                            message_history=history,
+                            model=FALLBACK_MODEL,
+                        )
+                    else:
+                        result = await agent.run(
+                            incoming_msg, deps=deps, message_history=history
+                        )
+                except UsageLimitExceeded as ule:
+                    logger.warning(
+                        "UsageLimitExceeded for %s: %s. Summarizing history and retrying...",
+                        user_number,
+                        ule,
+                    )
+                    await notify_error(
+                        ule,
+                        context=f"_process_message | user={user_number} | msg={incoming_msg[:200]} | action=summary_retry",
+                    )
+                    chat_str = await services.get_chat_str(user_number)
+                    summary = await summarize_conversation(chat_str)
+                    await services.reset_chat(user_number)
+                    await services.create_message(
+                        phone=user_number, role="system", message=summary
+                    )
+                    logger.info(
+                        "[history] Summarized history and saved system message for %s",
+                        user_number,
+                    )
+                    new_history = await services.get_pydantic_ai_history(
+                        user_number, hours=24
+                    )
+                    result = await agent.run(
+                        incoming_msg, deps=deps, message_history=new_history
+                    )
+
+                response_time = time.monotonic() - agent_start
+                ai_response = strip_markdown(result.output)
+                tools_used = _extract_tools_used(result)
+
+                if response_time > SLOW_RESPONSE_THRESHOLD:
+                    logger.warning(
+                        "Slow response for %s: %.1fs", user_number, response_time
+                    )
+                    await notify_slow_response(
+                        phone=user_number,
+                        user_message=incoming_msg,
+                        tools_used=tools_used,
+                        ai_response=ai_response,
+                        message_datetime=message_datetime,
+                        history_count=len(history),
+                        response_time=response_time,
+                        provider_error=provider_error,
+                    )
+
+            except Exception as agent_exc:
+                logger.error(
+                    "Agent error for %s: %s", user_number, agent_exc, exc_info=True
                 )
                 await notify_error(
-                    ule,
-                    context=f"_process_message | user={user_number} | msg={incoming_msg[:200]} | action=summary_retry",
+                    agent_exc,
+                    context=f"_process_message | user={user_number} | msg={incoming_msg[:200]}",
                 )
-                chat_str = await services.get_chat_str(user_number)
-                summary = await summarize_conversation(chat_str)
-                await services.reset_chat(user_number)
-                await services.create_message(
-                    phone=user_number, role="system", message=summary
-                )
-                logger.info(
-                    "[history] Summarized history and saved system message for %s",
-                    user_number,
-                )
-                new_history = await services.get_pydantic_ai_history(
-                    user_number, hours=24
-                )
-                result = await agent.run(
-                    incoming_msg, deps=deps, message_history=new_history
-                )
+                try:
+                    explanation = await run_error_agent(traceback.format_exc())
+                    ai_response = explanation.user_message
+                except Exception as explainer_exc:
+                    logger.error("Error agent also failed: %s", explainer_exc)
+                    ai_response = await localize_message(user_number, USER_ERROR_MSG)
+                tools_used = []
 
-            response_time = time.monotonic() - agent_start
-            ai_response = strip_markdown(result.output)
-            tools_used = _extract_tools_used(result)
+            logger.info("🤖 Agent response for %s: %s", user_number, ai_response)
+            logger.info("🔧 Tools used: %s", tools_used)
 
-            if response_time > SLOW_RESPONSE_THRESHOLD:
-                logger.warning(
-                    "Slow response for %s: %.1fs", user_number, response_time
-                )
-                await notify_slow_response(
-                    phone=user_number,
-                    user_message=incoming_msg,
-                    tools_used=tools_used,
-                    ai_response=ai_response,
-                    message_datetime=message_datetime,
-                    history_count=len(history),
-                    response_time=response_time,
-                    provider_error=provider_error,
-                )
-
-        except Exception as agent_exc:
-            logger.error(
-                "Agent error for %s: %s", user_number, agent_exc, exc_info=True
+            await message_handler.save_assistant_msg(
+                user_number, ai_response, tools_used
             )
+            await whatsapp_manager.send_text(
+                user_number=user_number, text=ai_response, message_id=message_id
+            )
+            asyncio.create_task(_maybe_compress_history(user_number, len(history)))
+            asyncio.create_task(
+                upload_message_transcript(
+                    client=erp_client,
+                    phone_number=user_number,
+                    user_message=incoming_msg,
+                    bot_response=ai_response,
+                )
+            )
+
+        except Exception as exc:
+            logger.exception("Error processing message for %s: %s", user_number, exc)
             await notify_error(
-                agent_exc,
+                exc,
                 context=f"_process_message | user={user_number} | msg={incoming_msg[:200]}",
             )
-            try:
-                explanation = await run_error_agent(traceback.format_exc())
-                ai_response = explanation.user_message
-            except Exception as explainer_exc:
-                logger.error("Error agent also failed: %s", explainer_exc)
-                ai_response = await localize_message(user_number, USER_ERROR_MSG)
-            tools_used = []
-
-        logger.info("🤖 Agent response for %s: %s", user_number, ai_response)
-        logger.info("🔧 Tools used: %s", tools_used)
-
-        await message_handler.save_assistant_msg(user_number, ai_response, tools_used)
-        await whatsapp_manager.send_text(
-            user_number=user_number, text=ai_response, message_id=message_id
-        )
-        asyncio.create_task(_maybe_compress_history(user_number, len(history)))
-        asyncio.create_task(
-            upload_message_transcript(
-                client=erp_client,
-                phone_number=user_number,
-                user_message=incoming_msg,
-                bot_response=ai_response,
+            await whatsapp_manager.send_text(
+                user_number=user_number,
+                text=await localize_message(user_number, USER_ERROR_MSG),
+                message_id=message_id,
             )
-        )
-
-    except Exception as exc:
-        logger.exception("Error processing message for %s: %s", user_number, exc)
-        await notify_error(
-            exc,
-            context=f"_process_message | user={user_number} | msg={incoming_msg[:200]}",
-        )
-        await whatsapp_manager.send_text(
-            user_number=user_number,
-            text=await localize_message(user_number, USER_ERROR_MSG),
-            message_id=message_id,
-        )
 
 
 @router.post("")

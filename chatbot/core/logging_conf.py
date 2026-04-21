@@ -68,7 +68,7 @@ logging_conf = {
             "level": "WARNING",
         },
         "chatbot": {
-            "handlers": ["default", "rotating_file", "sentry"],
+            "handlers": ["default", "rotating_file"],
             "level": "DEBUG" if config.ENV_STATE == "dev" else "INFO",
             "propagate": False,
         },

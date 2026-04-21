@@ -315,6 +315,7 @@ async def _complete_payment(
             erp_client=erp_client,
             ticket_id=ticket_id,
             amount=amount,
+            payment_type="Deposit",
             ocr_payload=ocr_payload,
             receipt_file_path=file_path,
         )

@@ -142,6 +142,7 @@ async def test_register_deposit_payment(
             erp_client=erp_client,
             ticket_id=_TEST_TICKET_ID,
             amount=40.00,
+            payment_type="Deposit",
             ocr_payload=dict(_SAMPLE_OCR_PAYLOAD),  # copia para no mutar el original
             receipt_file_path=str(_TEST_RECEIPT_PATH),
         )

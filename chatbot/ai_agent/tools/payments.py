@@ -10,7 +10,7 @@ import logging
 import re
 from enum import StrEnum
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import httpx
 from pydantic_ai import ModelRetry, RunContext
@@ -133,6 +133,7 @@ async def register_deposit_payment(
     erp_client: httpx.AsyncClient,
     ticket_id: str,
     amount: float,
+    payment_type: Literal["Deposit", "Balance"] = "Deposit",
     ocr_payload: dict | None = None,
     receipt_file_path: str | None = None,
 ) -> DepositPaymentResult:
@@ -144,6 +145,8 @@ async def register_deposit_payment(
         erp_client: Authenticated ERP HTTP client.
         ticket_id: ERP ticket identifier (e.g. TKT-2026-03-00018).
         amount: Amount paid, extracted from the receipt.
+        payment_type: Type of payment. Use "Deposit" for señas and "Balance"
+            for the remaining ticket balance.
         ocr_payload: Optional raw OCR data dict to attach to the payment record.
         receipt_file_path: Local path to the downloaded receipt PDF/image.
 
@@ -181,6 +184,7 @@ async def register_deposit_payment(
         form_data = {
             "ticket_id": ticket_id,
             "amount": str(amount),
+            "payment_type": payment_type,
             "verification_method": "OCR",
             "ocr_payload": json.dumps(ocr_payload)
             if ocr_payload is not None
@@ -206,6 +210,7 @@ async def register_deposit_payment(
             json={
                 "ticket_id": ticket_id,
                 "amount": amount,
+                "payment_type": payment_type,
                 "verification_method": "OCR",
                 "ocr_payload": ocr_payload,
             },

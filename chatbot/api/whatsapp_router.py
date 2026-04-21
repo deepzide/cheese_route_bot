@@ -320,6 +320,7 @@ async def _register_and_notify_payment(
             erp_client=erp_client,
             ticket_id=ticket_id,
             amount=amount,
+            payment_type="Deposit",
             ocr_payload=ocr_payload,
             receipt_file_path=file_path,
         )
@@ -924,6 +925,7 @@ async def _process_image_receipt(
             erp_client=erp_client,
             ticket_id=ticket_id,
             amount=amount,
+            payment_type="Deposit",
             ocr_payload=ocr_payload,
             receipt_file_path=file_path,
         )

@@ -1042,10 +1042,12 @@ class PaymentInstructions(BaseModel):
     ERP endpoint: deposit_controller.get_deposit_instructions
     ERP response fields: deposit_id, ticket_id, amount_required, amount_paid,
     amount_remaining, due_at, status, payment_link, instructions.
+    When deposit_required is False the ERP omits deposit_id.
     """
 
-    deposit_id: str
+    deposit_id: str | None = None
     ticket_id: str
+    deposit_required: bool | None = None
     amount_required: float | None = None
     amount_paid: float | None = None
     amount_remaining: float | None = None

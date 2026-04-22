@@ -1,3 +1,4 @@
+import datetime
 import logging
 import re
 from dataclasses import dataclass
@@ -19,8 +20,47 @@ logger = logging.getLogger(__name__)
 META_REQUEST_TIMEOUT_SECONDS = 10.0
 MEDIA_REQUEST_TIMEOUT_SECONDS = 20.0
 
-# Regex to match ERP ticket IDs like TKT-2026-03-00018
+# Regex to match full ERP ticket IDs like TKT-2026-03-00018
 _TICKET_ID_RE = re.compile(r"TKT-\d{4}-\d{2}-\d+", re.IGNORECASE)
+
+# Regex to match partial ticket serials (standalone digit sequences, e.g. "00182" or "182")
+_PARTIAL_TICKET_RE = re.compile(r"\b(\d{1,8})\b")
+
+
+def _autocomplete_ticket(serial: str) -> str:
+    """Complete a partial ticket serial to the full TKT-YYYY-MM-NNNNN format."""
+    now = datetime.date.today()
+    return f"TKT-{now.year}-{now.month:02d}-{serial.zfill(5)}"
+
+
+def extract_ticket_id(text: str) -> str | None:
+    """Extract a ticket ID from text, auto-completing partial serials.
+
+    Tries the full TKT-YYYY-MM-NNNNN pattern first.  If not found, looks
+    for a standalone digit sequence and completes it with the current
+    year and month (e.g. "00182" → "TKT-2026-04-00182").
+
+    Args:
+        text: Raw text sent by the user.
+
+    Returns:
+        Uppercase ticket ID string, or None if no ticket could be identified.
+    """
+    match = _TICKET_ID_RE.search(text)
+    if match:
+        return match.group().upper()
+
+    partial = _PARTIAL_TICKET_RE.search(text)
+    if partial:
+        completed = _autocomplete_ticket(partial.group(1))
+        logger.info(
+            "[extract_ticket_id] Partial serial %r auto-completed to %s",
+            partial.group(1),
+            completed,
+        )
+        return completed
+
+    return None
 
 
 def _get_meta_headers() -> dict[str, str]:
@@ -372,9 +412,8 @@ async def _extract_image_from_message(
     # Extract ticket_id from caption
     ticket_id: str | None = None
     if caption:
-        match = _TICKET_ID_RE.search(caption)
-        if match:
-            ticket_id = match.group().upper()
+        ticket_id = extract_ticket_id(caption)
+        if ticket_id:
             logger.info("[image] Extracted ticket_id=%s from caption", ticket_id)
         else:
             logger.debug("[image] Caption present but no ticket_id found: %r", caption)
@@ -446,9 +485,8 @@ async def _extract_pdf_from_message(
     # Extract ticket_id from caption
     ticket_id: str | None = None
     if caption:
-        match = _TICKET_ID_RE.search(caption)
-        if match:
-            ticket_id = match.group().upper()
+        ticket_id = extract_ticket_id(caption)
+        if ticket_id:
             logger.info("[pdf] Extracted ticket_id=%s from caption", ticket_id)
         else:
             logger.debug("[pdf] Caption present but no ticket_id found: %r", caption)

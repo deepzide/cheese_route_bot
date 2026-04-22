@@ -52,10 +52,10 @@ from chatbot.api.utils.survey_feedback import (
 )
 from chatbot.api.utils.text import strip_markdown
 from chatbot.api.utils.webhook_parser import (
-    _TICKET_ID_RE,
     ParsedMessage,
     create_or_retrieve_images_dir,
     extract_message_content,
+    extract_ticket_id,
 )
 from chatbot.core import human_control
 from chatbot.core.config import config
@@ -536,9 +536,8 @@ async def _process_message(message: Message) -> None:
         # Pending payment receipt — waiting for ticket ID from the user
         # ------------------------------------------------------------------
         if user_number in _pending_receipt:
-            match = _TICKET_ID_RE.search(incoming_msg)
-            if match:
-                ticket_id_pending = match.group().upper()
+            ticket_id_pending = extract_ticket_id(incoming_msg)
+            if ticket_id_pending:
                 logger.info(
                     "[receipt] Received ticket_id=%s for pending receipt of user=%s",
                     ticket_id_pending,

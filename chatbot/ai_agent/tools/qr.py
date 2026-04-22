@@ -7,6 +7,12 @@ from pydantic import ValidationError
 from pydantic_ai import RunContext
 
 from chatbot.ai_agent.dependencies import AgentDeps
+from chatbot.ai_agent.models import (
+    ERP_BASE_PATH,
+    PaymentInstructions,
+    ReservationStatusDetail,
+)
+from chatbot.ai_agent.tools.erp_utils import extract_erp_data
 from chatbot.api.utils.qr import (
     build_qr_caption,
     build_qr_image_url,
@@ -17,6 +23,80 @@ from chatbot.messaging.whatsapp import _ensure_rgb_png
 logger = logging.getLogger(__name__)
 
 QR_IMAGE_TIMEOUT_SECONDS: float = 15.0
+ERP_TIMEOUT_SECONDS: float = 15.0
+
+
+async def _validate_qr_eligibility(
+    erp_client: httpx.AsyncClient, ticket_id: str
+) -> str | None:
+    """Check that the ticket is CONFIRMED and has the deposit fully paid.
+
+    Returns an error message string if the ticket is not eligible, or None if it is.
+    """
+    # 1. Check reservation status
+    try:
+        status_resp = await erp_client.post(
+            f"{ERP_BASE_PATH}.ticket_controller.get_reservation_status",
+            json={"reservation_id": ticket_id},
+            timeout=ERP_TIMEOUT_SECONDS,
+        )
+        status_resp.raise_for_status()
+        detail = ReservationStatusDetail.model_validate(
+            extract_erp_data(status_resp.json())
+        )
+    except Exception as exc:
+        logger.warning(
+            "[send_checkin_qr] Could not verify ticket status for %s: %s",
+            ticket_id,
+            exc,
+        )
+        return "Could not verify the ticket status. Please try again later."
+
+    if (detail.status or "").lower() != "confirmed":
+        logger.info(
+            "[send_checkin_qr] Ticket %s not CONFIRMED (status=%s) — QR denied",
+            ticket_id,
+            detail.status,
+        )
+        return (
+            f"The QR code for ticket {ticket_id} is not available because the reservation "
+            f"is not in CONFIRMED status (current status: {detail.status})."
+        )
+
+    # 2. Check deposit payment — skip if deposit is not required
+    if not detail.deposit_required:
+        return None
+
+    try:
+        dep_resp = await erp_client.post(
+            f"{ERP_BASE_PATH}.deposit_controller.get_deposit_instructions",
+            json={"ticket_id": ticket_id},
+            timeout=ERP_TIMEOUT_SECONDS,
+        )
+        dep_resp.raise_for_status()
+        instructions = PaymentInstructions.model_validate(
+            extract_erp_data(dep_resp.json())
+        )
+    except Exception as exc:
+        logger.warning(
+            "[send_checkin_qr] Could not verify deposit for ticket %s: %s",
+            ticket_id,
+            exc,
+        )
+        return "Could not verify the deposit payment. Please try again later."
+
+    if instructions.amount_remaining is not None and instructions.amount_remaining > 0:
+        logger.info(
+            "[send_checkin_qr] Ticket %s has pending deposit (amount_remaining=%.2f) — QR denied",
+            ticket_id,
+            instructions.amount_remaining,
+        )
+        return (
+            f"The QR code for ticket {ticket_id} is not available yet because the deposit "
+            f"payment has not been completed. Pending amount: {instructions.amount_remaining}."
+        )
+
+    return None
 
 
 async def send_checkin_qr(ctx: RunContext[AgentDeps], ticket_id: str) -> str:
@@ -25,13 +105,18 @@ async def send_checkin_qr(ctx: RunContext[AgentDeps], ticket_id: str) -> str:
     Fetch the QR token from the ERP, download the image and deliver it via
     the current messaging channel (WhatsApp or Telegram).  Use this tool
     when the client explicitly asks for their check-in QR or says they did
-    not receive it.
+    not receive it.  The ticket must be in CONFIRMED status and the deposit
+    payment must be fully completed.
 
     Args:
         ctx: Agent run context with dependencies.
         ticket_id: The reservation ticket ID (e.g. TKT-2026-03-00067).
     """
     logger.info("[send_checkin_qr] ticket_id=%s", ticket_id)
+
+    error_msg = await _validate_qr_eligibility(ctx.deps.erp_client, ticket_id)
+    if error_msg:
+        return error_msg
 
     if ctx.deps.send_photo_callback is None:
         return (

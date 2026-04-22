@@ -89,8 +89,8 @@ from chatbot.api.utils.telegram_commands import (
 )
 from chatbot.api.utils.text import strip_markdown
 from chatbot.api.utils.webhook_parser import (
-    _TICKET_ID_RE,
     create_or_retrieve_images_dir,
+    extract_ticket_id,
 )
 from chatbot.core import human_control
 from chatbot.core.config import config
@@ -650,9 +650,8 @@ async def _handle_image(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         caption: str | None = update.message.caption
         ticket_id: str | None = None
         if caption:
-            match = _TICKET_ID_RE.search(caption)
-            if match:
-                ticket_id = match.group().upper()
+            ticket_id = extract_ticket_id(caption)
+            if ticket_id:
                 logger.info("[image] Extracted ticket_id=%s from caption", ticket_id)
             else:
                 logger.debug("[image] Caption present but no ticket_id: %r", caption)
@@ -747,9 +746,8 @@ async def _handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         caption: str | None = update.message.caption
         ticket_id: str | None = None
         if caption:
-            match = _TICKET_ID_RE.search(caption)
-            if match:
-                ticket_id = match.group().upper()
+            ticket_id = extract_ticket_id(caption)
+            if ticket_id:
                 logger.info("[pdf] Extracted ticket_id=%s from caption", ticket_id)
             else:
                 logger.debug("[pdf] Caption present but no ticket_id: %r", caption)
@@ -876,9 +874,8 @@ async def _handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         # Pending payment receipt — waiting for ticket ID
         # ------------------------------------------------------------------
         if chat_id in _pending_receipt:
-            match = _TICKET_ID_RE.search(incoming_msg)
-            if match:
-                ticket_id_pending = match.group().upper()
+            ticket_id_pending = extract_ticket_id(incoming_msg)
+            if ticket_id_pending:
                 logger.info(
                     "[receipt] Received ticket_id=%s for pending receipt of telegram_id=%s",
                     ticket_id_pending,

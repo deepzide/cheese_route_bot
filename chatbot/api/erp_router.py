@@ -768,16 +768,28 @@ async def notify_ticket_status(body: ERPTicketStatusRequest) -> dict[str, str]:
             f"• `contact_id`: `{body.contact_id}`\n"
             f"• `ticket_id`: `{body.ticket_id}`\n"
             f"• `new_status`: `{body.new_status}`\n"
+            f"• `phone`: `{phone}`\n"
+            f"• `channel`: `{channel}`\n"
             + (f"• `observations`: {body.observations}\n" if body.observations else "")
         )
-        survey_request = _build_activity_completed_request(body.contact_id, ticket)
-        return await _dispatch_activity_completed_survey(
-            survey_request,
-            contact,
-            ticket,
-            channel=channel,
-            telegram_chat_id=phone if channel == CHANNEL_TELEGRAM else None,
-        )
+        try:
+            survey_request = _build_activity_completed_request(body.contact_id, ticket)
+            return await _dispatch_activity_completed_survey(
+                survey_request,
+                contact,
+                ticket,
+                channel=channel,
+                telegram_chat_id=phone if channel == CHANNEL_TELEGRAM else None,
+            )
+        except HTTPException as exc:
+            await notify_dev(
+                f"⚠️ *Error al enviar encuesta de satisfacción*\n"
+                f"• `ticket_id`: `{body.ticket_id}`\n"
+                f"• `phone`: `{phone}`\n"
+                f"• `status_code`: `{exc.status_code}`\n"
+                f"• `detail`: {exc.detail}"
+            )
+            raise
 
     # 3. Construir el mensaje
     message = _build_ticket_message(body.new_status, body.ticket_id, body.observations)

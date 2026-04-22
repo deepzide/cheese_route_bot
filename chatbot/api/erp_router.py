@@ -385,7 +385,7 @@ def _validate_activity_completed_payload(
             detail=f"Slot {body.slot_id} does not have a valid date in the ERP",
         )
 
-    try:
+    """ try:
         slot_date = date.fromisoformat(slot_date_str)
     except ValueError as exc:
         raise HTTPException(
@@ -399,7 +399,7 @@ def _validate_activity_completed_payload(
             detail=(
                 f"Slot {body.slot_id} has not yet occurred; a survey cannot be requested before {slot_date_str}"
             ),
-        )
+        ) """
 
 
 def _build_activity_completed_request(

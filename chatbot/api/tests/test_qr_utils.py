@@ -87,8 +87,8 @@ async def test_fetch_reservation_qr_returns_qr_data_for_ticket() -> None:
 # uv run pytest -s chatbot/api/tests/test_qr_utils.py::test_fetch_qr_upload_and_send_whatsapp
 @pytest.mark.asyncio
 async def test_fetch_qr_upload_and_send_whatsapp() -> None:
-    """Recupera el QR del ticket TKT-2026-04-00136, lo sube a WhatsApp Media API y lo envía."""
-    ticket_id = "TKT-2026-04-00136"
+    """Recupera el QR del ticket TKT-2026-04-00183, lo sube a WhatsApp Media API y lo envía."""
+    ticket_id = "TKT-2026-04-00183"
     recipient = "+34936069261"
 
     erp_client = build_erp_client()

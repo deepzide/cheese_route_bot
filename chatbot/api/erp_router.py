@@ -4,6 +4,7 @@ from typing import Any
 
 import httpx
 from fastapi import APIRouter, Body, Depends, HTTPException, status
+from pydantic import BaseModel
 
 from chatbot.ai_agent.agent import PROMPT_FILE, reset_cheese_agent
 from chatbot.ai_agent.models import (
@@ -23,11 +24,15 @@ from chatbot.ai_agent.tools.erp_utils import extract_erp_data
 from chatbot.ai_agent.translation_agent import localize_message
 from chatbot.api.utils.message_handler import save_assistant_msg as save_msg
 from chatbot.api.utils.security import get_api_key
-from chatbot.api.utils.survey_feedback import PendingSurvey, set_pending_survey
+from chatbot.api.utils.survey_feedback import (
+    PendingSurvey,
+    get_survey_record,
+    set_pending_survey,
+)
 from chatbot.api.whatsapp_router import erp_client
 from chatbot.core import human_control
 from chatbot.db.services import services
-from chatbot.messaging.telegram_notifier import notify_error
+from chatbot.messaging.telegram_notifier import notify_dev, notify_error
 from chatbot.messaging.telegram_notifier import send_message as send_telegram
 from chatbot.messaging.whatsapp import whatsapp_manager
 from chatbot.reminders.lead_followup import CHANNEL_TELEGRAM, infer_channel
@@ -39,7 +44,7 @@ ERP_TIMEOUT: float = 15.0
 WHATSAPP_WINDOW_HOURS: int = 24
 SURVEY_MESSAGE: str = (
     "We'd love to hear your feedback about the experience you just completed. "
-    "Please reply with a rating from 1 to 5 and, if you want, a short comment.\n\n"
+    "Please reply with a rating from 1 to 5 and, if you want, a short comment."
 )
 
 # ---------------------------------------------------------------------------
@@ -78,6 +83,22 @@ _TICKET_MESSAGES: dict[TicketDecision, str] = {
         "We hope you enjoy the experience."
     ),
 }
+
+
+# ---------------------------------------------------------------------------
+# Response models
+# ---------------------------------------------------------------------------
+
+
+class SurveyStatusResponse(BaseModel):
+    phone: str
+    survey_sent: bool
+    sent_at: datetime | None = None
+    ticket_id: str | None = None
+    responded: bool = False
+    rating: int | None = None
+    comment: str | None = None
+    responded_at: datetime | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -742,6 +763,13 @@ async def notify_ticket_status(body: ERPTicketStatusRequest) -> dict[str, str]:
     channel = infer_channel(conversation_id=phone, messages=messages)
 
     if body.new_status == TicketDecision.COMPLETED:
+        await notify_dev(
+            "📋 *Webhook ticket-status recibido — estado: completed*\n"
+            f"• `contact_id`: `{body.contact_id}`\n"
+            f"• `ticket_id`: `{body.ticket_id}`\n"
+            f"• `new_status`: `{body.new_status}`\n"
+            + (f"• `observations`: {body.observations}\n" if body.observations else "")
+        )
         survey_request = _build_activity_completed_request(body.contact_id, ticket)
         return await _dispatch_activity_completed_survey(
             survey_request,
@@ -963,3 +991,35 @@ async def update_agent_prompt(
     reset_cheese_agent()
     logger.info("[update-prompt] Prompt actualizado y agente reiniciado")
     return {"status": "ok", "chars": str(len(prompt))}
+
+
+@router.get(
+    "/survey-status/{phone}",
+    summary="Get the satisfaction survey status for a customer",
+    response_model=SurveyStatusResponse,
+)
+async def get_survey_status(phone: str) -> SurveyStatusResponse:
+    """Returns whether a satisfaction survey was sent to the customer and their response.
+
+    Path:
+        - phone: Customer's phone number or Telegram chat ID.
+
+    Returns a 404 if no survey has been sent to that customer in the current session.
+    """
+    logger.info("[survey-status] phone=%s", phone)
+    record = get_survey_record(phone)
+    if record is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"No satisfaction survey record found for {phone}",
+        )
+    return SurveyStatusResponse(
+        phone=phone,
+        survey_sent=True,
+        sent_at=record.sent_at,
+        ticket_id=record.survey.ticket_id,
+        responded=record.responded,
+        rating=record.rating,
+        comment=record.comment,
+        responded_at=record.responded_at,
+    )

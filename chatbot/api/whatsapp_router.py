@@ -48,6 +48,7 @@ from chatbot.api.utils.survey_feedback import (
     clear_pending_survey,
     extract_survey_feedback,
     get_pending_survey,
+    record_survey_response,
 )
 from chatbot.api.utils.text import strip_markdown
 from chatbot.api.utils.webhook_parser import (
@@ -486,6 +487,7 @@ async def _handle_pending_survey_response(
         )
         return True
 
+    record_survey_response(user_number, feedback.rating, feedback.comment)
     clear_pending_survey(user_number)
     thanks_message = await localize_message(
         user_number,

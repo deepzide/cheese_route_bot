@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
+from datetime import UTC, datetime
 
 
 @dataclass(slots=True)
@@ -18,7 +19,23 @@ class SurveyFeedback:
     comment: str | None = None
 
 
+@dataclass
+class SurveyRecord:
+    """Registro persistente en memoria de una encuesta enviada y su respuesta."""
+
+    survey: PendingSurvey
+    sent_at: datetime
+    rating: int | None = None
+    comment: str | None = None
+    responded_at: datetime | None = None
+
+    @property
+    def responded(self) -> bool:
+        return self.rating is not None
+
+
 _pending_surveys: dict[str, PendingSurvey] = {}
+_survey_records: dict[str, SurveyRecord] = {}
 
 _EXPLICIT_RATING_PATTERNS: tuple[re.Pattern[str], ...] = (
     re.compile(
@@ -76,6 +93,7 @@ _COMMENT_PREFIX_RE = re.compile(
 
 def set_pending_survey(phone: str, survey: PendingSurvey) -> None:
     _pending_surveys[phone] = survey
+    _survey_records[phone] = SurveyRecord(survey=survey, sent_at=datetime.now(UTC))
 
 
 def get_pending_survey(phone: str) -> PendingSurvey | None:
@@ -84,6 +102,34 @@ def get_pending_survey(phone: str) -> PendingSurvey | None:
 
 def clear_pending_survey(phone: str) -> None:
     _pending_surveys.pop(phone, None)
+
+
+def record_survey_response(phone: str, rating: int, comment: str | None = None) -> None:
+    """Registra la respuesta recibida del cliente para una encuesta enviada.
+
+    Args:
+        phone: Identificador del usuario (teléfono o chat_id).
+        rating: Calificación de 1 a 5.
+        comment: Comentario opcional del cliente.
+    """
+    record = _survey_records.get(phone)
+    if record is None:
+        return
+    record.rating = rating
+    record.comment = comment
+    record.responded_at = datetime.now(UTC)
+
+
+def get_survey_record(phone: str) -> SurveyRecord | None:
+    """Devuelve el registro de la última encuesta enviada al usuario.
+
+    Args:
+        phone: Identificador del usuario (teléfono o chat_id).
+
+    Returns:
+        SurveyRecord si se envió una encuesta, None si no.
+    """
+    return _survey_records.get(phone)
 
 
 def extract_survey_feedback(message: str) -> SurveyFeedback | None:

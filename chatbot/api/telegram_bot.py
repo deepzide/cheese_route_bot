@@ -62,6 +62,7 @@ from chatbot.api.utils.survey_feedback import (
     clear_pending_survey,
     extract_survey_feedback,
     get_pending_survey,
+    record_survey_response,
 )
 from chatbot.api.utils.telegram_commands import (
     cmd_cancel_reservation,
@@ -513,6 +514,7 @@ async def _handle_pending_survey_response(
         await message.reply_text(error_message, do_quote=True)
         return True
 
+    record_survey_response(chat_id, feedback.rating, feedback.comment)
     clear_pending_survey(chat_id)
     thanks_message = await localize_message(
         chat_id,

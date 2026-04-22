@@ -90,7 +90,7 @@ def test_validate_ticket_status_payload_rejects_ticket_from_other_contact() -> N
         _validate_ticket_status_payload(body=body, contact=contact, ticket=ticket)
     except HTTPException as exc:
         assert exc.status_code == 422
-        assert exc.detail == "El ticket TICKET-1 no pertenece al contacto CONTACT-1"
+        assert "does not belong to contact" in exc.detail
     else:
         raise AssertionError(
             "Se esperaba HTTPException cuando el ticket no pertenece al contacto"
@@ -115,7 +115,7 @@ def test_validate_ticket_status_payload_rejects_status_mismatch() -> None:
         _validate_ticket_status_payload(body=body, contact=contact, ticket=ticket)
     except HTTPException as exc:
         assert exc.status_code == 422
-        assert "no coincide con el nuevo estado recibido" in exc.detail
+        assert "does not match" in exc.detail
     else:
         raise AssertionError(
             "Se esperaba HTTPException cuando el estado del ERP no coincide"
@@ -152,7 +152,7 @@ async def test_notify_ticket_status_completed_triggers_survey(monkeypatch) -> No
     ticket = ReservationStatusDetail(
         ticket_id="TICKET-1",
         status="COMPLETED",
-        contact=ReservationContactDetail(contact_id="CONTACT-1"),
+        contact=ReservationContactDetail(contact_id="CONTACT-1", phone="+59899000000"),
         experience=ReservationExperienceDetail(experience_id="EXP-1"),
         slot=ReservationSlotDetail(slot_id="SLOT-1", date=date.today().isoformat()),
     )
@@ -163,6 +163,10 @@ async def test_notify_ticket_status_completed_triggers_survey(monkeypatch) -> No
     class DummyMessage:
         created_at = datetime.now(UTC).replace(tzinfo=None)
 
+    class DummyUserMsg:
+        role: str = "user"
+        message: str = "hola"
+
     async def fake_get_contact_by_id(contact_id: str) -> ContactInfo:
         assert contact_id == body.contact_id
         return contact
@@ -172,7 +176,7 @@ async def test_notify_ticket_status_completed_triggers_survey(monkeypatch) -> No
         return ticket
 
     async def fake_get_messages(phone: str) -> list:
-        return []
+        return [DummyUserMsg()]
 
     async def fake_get_last_user_message(phone: str) -> DummyMessage:
         assert phone == contact.phone
@@ -225,12 +229,16 @@ async def test_notify_ticket_status_whatsapp_sends_message(monkeypatch) -> None:
     ticket = ReservationStatusDetail(
         ticket_id="TICKET-1",
         status="CANCELLED",
-        contact=ReservationContactDetail(contact_id="CONTACT-1"),
+        contact=ReservationContactDetail(contact_id="CONTACT-1", phone="+59899000000"),
     )
     sent_messages: list[tuple[str, str]] = []
 
     class DummyLastMsg:
         created_at = datetime.now(UTC).replace(tzinfo=None)
+
+    class DummyUserMsg:
+        role: str = "user"
+        message: str = "hola"
 
     async def fake_get_contact_by_id(contact_id: str) -> ContactInfo:
         return contact
@@ -239,7 +247,7 @@ async def test_notify_ticket_status_whatsapp_sends_message(monkeypatch) -> None:
         return ticket
 
     async def fake_get_messages(phone: str) -> list:
-        return []
+        return [DummyUserMsg()]
 
     async def fake_get_last_user_message(phone: str) -> DummyLastMsg:
         return DummyLastMsg()
@@ -280,11 +288,15 @@ async def test_notify_ticket_status_whatsapp_window_expired_raises(monkeypatch) 
     ticket = ReservationStatusDetail(
         ticket_id="TICKET-1",
         status="REJECTED",
-        contact=ReservationContactDetail(contact_id="CONTACT-1"),
+        contact=ReservationContactDetail(contact_id="CONTACT-1", phone="+59899000000"),
     )
 
     class OldMsg:
         created_at = (datetime.now(UTC) - timedelta(hours=25)).replace(tzinfo=None)
+
+    class DummyUserMsg:
+        role: str = "user"
+        message: str = "hola"
 
     async def fake_get_contact_by_id(contact_id: str) -> ContactInfo:
         return contact
@@ -293,7 +305,7 @@ async def test_notify_ticket_status_whatsapp_window_expired_raises(monkeypatch) 
         return ticket
 
     async def fake_get_messages(phone: str) -> list:
-        return []
+        return [DummyUserMsg()]
 
     async def fake_get_last_user_message(phone: str) -> OldMsg:
         return OldMsg()
@@ -311,7 +323,7 @@ async def test_notify_ticket_status_whatsapp_window_expired_raises(monkeypatch) 
         await erp_router.notify_ticket_status(body)
     except HTTPException as exc:
         assert exc.status_code == 422
-        assert "24h" in exc.detail or "expirado" in exc.detail
+        assert "24-hour" in exc.detail or "has expired" in exc.detail
     else:
         raise AssertionError(
             "Se esperaba HTTPException cuando la ventana de 24h expiró"
@@ -330,8 +342,12 @@ async def test_notify_ticket_status_whatsapp_no_messages_raises(monkeypatch) -> 
     ticket = ReservationStatusDetail(
         ticket_id="TICKET-1",
         status="EXPIRED",
-        contact=ReservationContactDetail(contact_id="CONTACT-1"),
+        contact=ReservationContactDetail(contact_id="CONTACT-1", phone="+59899000000"),
     )
+
+    class DummyUserMsg:
+        role: str = "user"
+        message: str = "hola"
 
     async def fake_get_contact_by_id(contact_id: str) -> ContactInfo:
         return contact
@@ -340,7 +356,7 @@ async def test_notify_ticket_status_whatsapp_no_messages_raises(monkeypatch) -> 
         return ticket
 
     async def fake_get_messages(phone: str) -> list:
-        return []
+        return [DummyUserMsg()]
 
     async def fake_get_last_user_message(phone: str) -> None:
         return None
@@ -358,7 +374,7 @@ async def test_notify_ticket_status_whatsapp_no_messages_raises(monkeypatch) -> 
         await erp_router.notify_ticket_status(body)
     except HTTPException as exc:
         assert exc.status_code == 422
-        assert "ventana" in exc.detail or "mensajes" in exc.detail
+        assert "No messages from user" in exc.detail or "messaging window" in exc.detail
     else:
         raise AssertionError(
             "Se esperaba HTTPException cuando no hay mensajes del usuario"
@@ -378,9 +394,15 @@ async def test_notify_ticket_status_telegram_sends_message(monkeypatch) -> None:
     ticket = ReservationStatusDetail(
         ticket_id="TICKET-1",
         status="REJECTED",
-        contact=ReservationContactDetail(contact_id="CONTACT-TG-1"),
+        contact=ReservationContactDetail(
+            contact_id="CONTACT-TG-1", phone=telegram_chat_id
+        ),
     )
     telegram_sent: list[tuple[str, str]] = []
+
+    class FakeTelegramMsg:
+        role: str = "system"
+        message: str = "CHANNEL: telegram"
 
     async def fake_get_contact_by_id(contact_id: str) -> ContactInfo:
         return contact
@@ -389,7 +411,7 @@ async def test_notify_ticket_status_telegram_sends_message(monkeypatch) -> None:
         return ticket
 
     async def fake_get_messages(phone: str) -> list:
-        return []
+        return [FakeTelegramMsg()]
 
     async def fake_send_telegram(*, chat_id: str, text: str) -> bool:
         telegram_sent.append((chat_id, text))
@@ -426,13 +448,17 @@ async def test_notify_ticket_status_completed_rejects_future_slot(monkeypatch) -
     ticket = ReservationStatusDetail(
         ticket_id="TICKET-1",
         status="COMPLETED",
-        contact=ReservationContactDetail(contact_id="CONTACT-1"),
+        contact=ReservationContactDetail(contact_id="CONTACT-1", phone="+59899000000"),
         experience=ReservationExperienceDetail(experience_id="EXP-1"),
         slot=ReservationSlotDetail(slot_id="SLOT-1", date=future_date),
     )
 
     class DummyMessage:
         created_at = datetime.now(UTC).replace(tzinfo=None)
+
+    class DummyUserMsg:
+        role: str = "user"
+        message: str = "hola"
 
     async def fake_get_contact_by_id(contact_id: str) -> ContactInfo:
         return contact
@@ -441,7 +467,7 @@ async def test_notify_ticket_status_completed_rejects_future_slot(monkeypatch) -
         return ticket
 
     async def fake_get_messages(phone: str) -> list:
-        return []
+        return [DummyUserMsg()]
 
     async def fake_get_last_user_message(phone: str) -> DummyMessage:
         return DummyMessage()
@@ -484,7 +510,9 @@ async def test_notify_ticket_status_completed_telegram_triggers_survey(
     ticket = ReservationStatusDetail(
         ticket_id="TICKET-TG-1",
         status="COMPLETED",
-        contact=ReservationContactDetail(contact_id="CONTACT-TG-1"),
+        contact=ReservationContactDetail(
+            contact_id="CONTACT-TG-1", phone=telegram_chat_id
+        ),
         experience=ReservationExperienceDetail(experience_id="EXP-TG-1"),
         slot=ReservationSlotDetail(slot_id="SLOT-TG-1", date=date.today().isoformat()),
     )

@@ -917,7 +917,7 @@ async def take_whatsapp_control(body: ERPWhatsAppControlRequest) -> dict[str, st
     "/release-control/whatsapp",
     summary="Release control of a WhatsApp conversation back to the bot",
 )
-async def release_whatsapp_control(body: ERPWhatsAppControlRequest) -> dict[str, str]:
+async def   (body: ERPWhatsAppControlRequest) -> dict[str, str]:
     """Re-enables automatic bot responses for the given WhatsApp number.
 
     Body:
